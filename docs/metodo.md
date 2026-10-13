@@ -65,7 +65,7 @@ Diseñados y todavía sin construir, en este orden: `/city:retro` (números y un
 
 ## `.city.json`
 
-El contrato entre el kit y cada repo está en `plugins/city/city.schema.json`; el de city-v2 sirve de ejemplo en `docs/ejemplos/city-v2.city.json`. De ahí salen los comandos de prueba (`tests`), la instalación del evaluador (`qa`), `features`, `specs_dir`, `evidencia_dir`, `adr_dir`, `ramas`, `label`, `codeowners_paths` y `tope_lineas`. Lo propio de cada máquina (puertos, versiones, cómo bajar una instalación) va en `docs/harness/entorno.md` del repo.
+El contrato entre el kit y cada repo está en `plugins/city/city.schema.json`; el de city-v2 sirve de ejemplo en `docs/ejemplos/city-v2.city.json`. De ahí salen los comandos de prueba (`tests`), la instalación del evaluador (`qa`), `features`, `specs_dir`, `evidencia_dir`, `adr_dir`, `ramas`, `label`, `codeowners_paths`, `tope_lineas` y, si el repo no sigue los valores por omisión, sus convenciones de commits, merge y versión (`git`). Lo propio de cada máquina (puertos, versiones, cómo bajar una instalación) va en `docs/harness/entorno.md` del repo.
 
 ## En CI
 

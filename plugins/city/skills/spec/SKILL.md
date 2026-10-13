@@ -53,7 +53,7 @@ Con `partir <id>`, la entrada es una funcionalidad de `features` con `passes: fa
    - `git diff origin/main -- <features>`: solo líneas agregadas; con `partir`, además la clave `reemplazada_por` y la coma que la precede.
    - `jq -e --arg s <ruta de la spec> '[.[] | select(.spec == $s)] | length > 0 and all(.passes == false and (.pasos | length) >= 2 and (.pasos | length) <= 5 and (.id | test("^[A-Za-z0-9_-][A-Za-z0-9._-]*$")))' <features>`: las nuevas, con `passes: false`, `spec`, de 2 a 5 pasos e ids válidos.
 
-9. **Commit** `docs(spec): <tema>` con la spec y `features`. El PR lo abre `/city:ship` en esta sesión (rama `docs/`, sin funcionalidad). Cuando entre a `main`, sigue `/city:goal <ids en orden>` o `/city:build <id>` en una sesión nueva por corte.
+9. **Commit** con la spec y `features`, con el mensaje de spec de `${CLAUDE_PLUGIN_ROOT}/skills/ship/git.md` según `git.commits` (sin la clave, `docs(spec): <tema>`). El PR lo abre `/city:ship` en esta sesión (rama `docs/`, sin funcionalidad). Cuando entre a `main`, sigue `/city:goal <ids en orden>` o `/city:build <id>` en una sesión nueva por corte.
 
 ## Reporte
 
