@@ -82,6 +82,16 @@
       "minLength": 1,
       "description": "Label que ship pone en cada PR; firma del flujo para aidd-metrics."
     },
+    "git": {
+      "type": "object",
+      "description": "Opcional. Convenciones de git del repo, detalladas en skills/ship/git.md. Sin la clave o sin un campo, vale el de por omisión.",
+      "additionalProperties": false,
+      "properties": {
+        "commits": { "enum": ["conventional", "gitmoji"], "description": "Formato de los commits y del título del PR. conventional (por omisión): <tipo>(<ámbito>): <qué cambia>. gitmoji: <emoji> <frase que dice qué cambia>." },
+        "merge": { "enum": ["auto", "manual"], "description": "auto (por omisión): ship activa el auto-merge por squash. manual: el PR lo aprueba y lo mergea una persona; ship no activa el auto-merge y goal no corre." },
+        "version": { "enum": ["tag", "asunto"], "description": "Dónde queda la versión de cada merge, para check. tag (por omisión): un tag sobre el commit del merge. asunto: el asunto del commit del squash." }
+      }
+    },
     "codeowners_paths": {
       "type": "array",
       "minItems": 1,

@@ -28,10 +28,10 @@ No hay piloto comparativo: el método se adopta app por app. Primero `city-v2`, 
    claude plugin install city@sensoria --scope project
    ```
    Escribe la configuración en `.claude/settings.json` del repo, que retiene CODEOWNERS. En una sesión, `/city:` debe mostrar `spec`, `build`, `ship`, `check` y `goal`, y `/mcp` el servidor `plugin:city:playwright`.
-2. **`.city.json`** en la raíz, contra `plugins/city/city.schema.json`. Su `qa` levanta una instalación local limpia; sin ella no hay evaluador y sin evaluador no hay `passes`. Si las specs no van en `docs/specs`, `specs_dir` dice dónde.
+2. **`.city.json`** en la raíz, contra `plugins/city/city.schema.json`. Su `qa` levanta una instalación local limpia; sin ella no hay evaluador y sin evaluador no hay `passes`. Si las specs no van en `docs/specs`, `specs_dir` dice dónde. Si el repo no escribe sus commits en Conventional Commits, no usa auto-merge o no versiona con tags, `git` lo dice (`plugins/city/skills/ship/git.md`).
 3. **`docs/harness/entorno.md`** con lo propio de la máquina: puertos, versiones y cómo bajar una instalación.
 4. **Labels:** `gh label create city --description "Flujo city" --repo SensoriaCity/<repo>` y `gh label create adr --description "Trae un ADR" --repo SensoriaCity/<repo>`.
-5. **Ruleset en `main`** con los checks requeridos (CI del repo, `revisor`, `evidencia`), squash, historial lineal y sin push directo; CODEOWNERS con los patrones de `codeowners_paths`; auto-merge permitido.
+5. **Ruleset en `main`** con los checks requeridos (CI del repo, `revisor`, `evidencia`), squash, historial lineal y sin push directo; CODEOWNERS con los patrones de `codeowners_paths`; auto-merge permitido, salvo con `git.merge: manual`.
 6. **Job `revisor`** en CI, como dice "En CI" de `metodo.md`, con los secretos `CLAUDE_CODE_OAUTH_TOKEN` y `CITY_AIDD_TOKEN` (lectura de este repo).
 7. **Sandbox y `deny`** en `.claude/settings.json`: sistema de archivos en el worktree, red a `github.com` y al registro de imágenes, y `deny` en los archivos de política.
 8. **Notion:** cada spec es un hito en Hitos v2 y cada corte una tarea en Tareas v2 ligada al hito, con la URL de su PR. Para medir cuánto tarda una tarea de En progreso a Finalizado, las dos automatizaciones de `programa-medicion.md` §10 (`Inicio` y `Fin`).

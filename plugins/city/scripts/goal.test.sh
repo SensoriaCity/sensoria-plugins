@@ -80,6 +80,15 @@ git -C "$tmp/repo" worktree list | grep -q 'goal-S1' && falla "git todavía list
 ls "$tmp"/t/city-goal/*.log >/dev/null 2>&1 || falla "el log debería quedar en \$TMPDIR/city-goal"
 [ -z "$(git -C "$tmp/repo" status --porcelain -- . ':!.claude')" ] || falla "goal.sh no debería dejar archivos en el repo"
 
+# Con git.merge manual, goal.sh no arranca ni abre sesiones.
+: > "$L"
+jq '. + {git: {merge: "manual"}}' "$tmp/repo/.city.json" > "$tmp/manual.json" && cp "$tmp/manual.json" "$tmp/repo/.city.json"
+(cd "$tmp/repo" && PATH="$tmp/bin:$PATH" TMPDIR="$tmp/t" "$BASH" "$G" S2 >/dev/null 2>"$tmp/stderr-manual")
+rc=$?
+[ "$rc" -eq 2 ] || falla "con git.merge manual debería salir con 2 (salió con $rc)"
+grep -q 'merge de este repo es manual' "$tmp/stderr-manual" || falla "con git.merge manual debería decir por qué no arranca"
+grep -q '^claude ' "$L" && falla "con git.merge manual no debería abrir sesiones de claude"
+
 if [ "$fallas" -gt 0 ]; then
   echo "--- stdout"; echo "$salida"; echo "--- stderr"; cat "$tmp/stderr"; echo "--- llamadas"; cat "$L"
   exit 1

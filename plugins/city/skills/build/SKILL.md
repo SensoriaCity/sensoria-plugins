@@ -13,7 +13,7 @@ Construyes una sola funcionalidad y dejas la rama lista para `/city:ship`. No te
 
 ## Configuración
 
-Lee `.city.json` en la raíz del repo (`git rev-parse --show-toplevel`). Si no existe, detente y dilo: el kit no sabe nada del stack y no adivina comandos. De ahí salen los comandos (`tests`, `qa`), las rutas (`features`, `evidencia_dir`, `adr_dir`), el prefijo de rama (`ramas`), el `label`, los `codeowners_paths` y el tope (`tope_lineas`). Su contrato está en `${CLAUDE_PLUGIN_ROOT}/city.schema.json`. Para lo propio de la máquina (puertos, versiones, servidores locales, cómo bajar una instalación), ver `docs/harness/entorno.md` del repo si existe; no lo supongas.
+Lee `.city.json` en la raíz del repo (`git rev-parse --show-toplevel`). Si no existe, detente y dilo: el kit no sabe nada del stack y no adivina comandos. De ahí salen los comandos (`tests`, `qa`), las rutas (`features`, `evidencia_dir`, `adr_dir`), el prefijo de rama (`ramas`), el `label`, los `codeowners_paths`, el tope (`tope_lineas`) y las convenciones de commits y merge (`git`, en `${CLAUDE_PLUGIN_ROOT}/skills/ship/git.md`). Su contrato está en `${CLAUDE_PLUGIN_ROOT}/city.schema.json`. Para lo propio de la máquina (puertos, versiones, servidores locales, cómo bajar una instalación), ver `docs/harness/entorno.md` del repo si existe; no lo supongas.
 
 ## Reglas duras
 
@@ -53,7 +53,7 @@ Lee `.city.json` en la raíz del repo (`git rev-parse --show-toplevel`). Si no e
 
 6. **Verifica** desde la raíz, uno por uno y literal, cada comando de `tests.unit`, `tests.lint`, `tests.estatico` y `tests.audit`, y los de `tests.navegador` si la funcionalidad tiene UI. Si un comando no existe en el repo (binario, script o paquete ausente), dilo en el reporte y sigue con los demás; no lo reemplaces por otro. Si el repo genera contratos o tipos de lo que cambiaste, regenéralos.
 
-7. **Commits** en Conventional Commits en español (`feat(<ámbito>): …`), los que hagan falta en la rama.
+7. **Commits** según `git.commits` de `${CLAUDE_PLUGIN_ROOT}/skills/ship/git.md` (sin la clave, Conventional Commits en español: `feat(<ámbito>): …`), los que hagan falta en la rama.
 
 8. **Tamaño:** `bash "${CLAUDE_PLUGIN_ROOT}/scripts/tamano.sh"`. Si sale con 1 (pasa `tope_lineas`), detente como en la compuerta: la partición y `Bloqueo: no es un corte. Pasa tope_lineas`.
 
@@ -76,7 +76,7 @@ Lee `.city.json` en la raíz del repo (`git rev-parse --show-toplevel`). Si no e
       Sin `qa.usuario`, quita usuario y contraseña. `· instalacion: desechable` va solo si esta sesión creó la instalación en ese clon y la va a bajar con `down -v`; si no, quítala y el evaluador no ejecuta pasos destructivos.
     - Si responde `BLOQUEADO: …`, no pudo empezar (URL, usuario, entorno): no guardes nada, dilo y detente. Un paso bloqueado llega como `VEREDICTO: no pasa` con el motivo en la tabla.
     - Si no, guarda su respuesta tal cual, sin agregar ni quitar una línea, en `<evidencia_dir>/<id>.md` (crea la carpeta si falta).
-    - Si su última línea es `VEREDICTO: pasa`, corre `bash "${CLAUDE_PLUGIN_ROOT}/scripts/passes.sh" <id>`. Si sale con 1, detente y pega su mensaje. Comitea la evidencia y el cambio de `features` juntos (`test(<ámbito>): evidencia de <id>`); con `no pasa`, comitea solo la evidencia.
+    - Si su última línea es `VEREDICTO: pasa`, corre `bash "${CLAUDE_PLUGIN_ROOT}/scripts/passes.sh" <id>`. Si sale con 1, detente y pega su mensaje. Comitea la evidencia y el cambio de `features` juntos, con el mensaje de evidencia de `git.md`; con `no pasa`, comitea solo la evidencia.
     - Si no pasa, corrige, haz commit y pide otra pasada: máximo 2. Si las correcciones cambian más que unas líneas, pide también otra vuelta al revisor.
     - Al terminar, baja la instalación de esta sesión como dice `docs/harness/entorno.md` del repo.
 

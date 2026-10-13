@@ -44,6 +44,10 @@ ramas=$(jq -r '.ramas // empty' .city.json) || { echo "goal: .city.json no es JS
 evidencia_dir=$(jq -r '.evidencia_dir // empty' .city.json)
 bajar=$(jq -r '.qa.bajar // empty' .city.json)
 [ -n "$ramas" ] || { echo "goal: .city.json no tiene ramas" >&2; exit 2; }
+if [ "$(jq -r '.git.merge // "auto"' .city.json)" = manual ]; then
+  echo "goal: el merge de este repo es manual (git.merge en .city.json) y el bucle necesita auto-merge" >&2
+  exit 2
+fi
 
 # El plan: si está versionado en origin/main, el worktree lo trae y va con su
 # ruta relativa; si no, va con su ruta absoluta y su carpeta se agrega a la sesión.

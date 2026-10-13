@@ -8,7 +8,7 @@ El marketplace `sensoria` con los plugins de Claude Code de Sensoria. Hoy trae u
 |---|---|---|
 | `/city:spec` | Cualquiera | Escribe la spec de una página de un hito y la parte en cortes verticales que caben en el tope; los agrega a `features` con `passes: false`. Con `partir <id>`, reemplaza una funcionalidad que no es un corte |
 | `/city:build` | Cualquiera | Construye una funcionalidad en su rama: compuerta de corte, prueba primero, tamaño, ADR, revisor y evaluador sobre una instalación limpia. `passes` cambia solo con la evidencia del evaluador |
-| `/city:ship` | Cualquiera | Abre el PR con la plantilla del repo y el label, y lo deja en auto-merge por squash |
+| `/city:ship` | Cualquiera | Abre el PR con la plantilla del repo y el label, y lo deja en auto-merge por squash o esperando el merge de una persona (`git.merge`) |
 | `/city:check` | Quien libera | Reporte de cierre de solo lectura: mergeados, `passes` con evidencia, retenidos, PR en rojo, ADR y qué clickear |
 | `/city:revisar` | CI, o cualquiera a mano | Revisa un PR por número con el `revisor` y deja `veredicto.md` y `veredicto.txt` para el check de CI |
 | `city:revisor` | `build`, `ship` y `revisar` | Lee el diff en contexto limpio; termina en "listo para merge" o "no mergear" |

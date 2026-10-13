@@ -1,17 +1,17 @@
 ---
 name: ship
-description: Abre el PR de la funcionalidad construida con /city:build, con la plantilla del repo y el label de .city.json, y lo deja en auto-merge por squash. Antes comprueba rama, árbol, tamaño, pruebas, veredictos vigentes del revisor y del evaluador, y la evidencia de passes. Úsala al final de /city:build, en la misma sesión.
+description: Abre el PR de la funcionalidad construida con /city:build, con la plantilla del repo y el label de .city.json, y lo deja en auto-merge por squash o esperando el merge de una persona, según git.merge. Antes comprueba rama, árbol, tamaño, pruebas, veredictos vigentes del revisor y del evaluador, y la evidencia de passes. Úsala al final de /city:build, en la misma sesión.
 argument-hint: "(sin argumentos)"
 disable-model-invocation: true
 ---
 
 # /city:ship
 
-Abres el PR y activas el auto-merge. No apruebas ni mergeas a mano: el PR entra solo cuando pasan los checks requeridos. Si CODEOWNERS lo retiene, lo lee una persona.
+Abres el PR y, si el repo usa auto-merge, lo activas. Nunca apruebas ni mergeas: con auto-merge el PR entra cuando pasan los checks requeridos; con merge manual, lo aprueba y lo mergea una persona. Si CODEOWNERS lo retiene, lo lee una persona.
 
 ## Configuración
 
-Lee `.city.json` en la raíz del repo (`git rev-parse --show-toplevel`). Si no existe, detente y dilo: el kit no sabe nada del stack y no adivina comandos. De ahí salen los comandos (`tests`, `qa`), las rutas (`features`, `evidencia_dir`, `adr_dir`), el prefijo de rama (`ramas`), el `label`, los `codeowners_paths` y el tope (`tope_lineas`). Su contrato está en `${CLAUDE_PLUGIN_ROOT}/city.schema.json`. Para lo propio de la máquina (puertos, versiones, servidores locales, cómo bajar una instalación), ver `docs/harness/entorno.md` del repo si existe; no lo supongas.
+Lee `.city.json` en la raíz del repo (`git rev-parse --show-toplevel`). Si no existe, detente y dilo: el kit no sabe nada del stack y no adivina comandos. De ahí salen los comandos (`tests`, `qa`), las rutas (`features`, `evidencia_dir`, `adr_dir`), el prefijo de rama (`ramas`), el `label`, los `codeowners_paths`, el tope (`tope_lineas`) y las convenciones de commits, merge y versión (`git`, en `${CLAUDE_SKILL_DIR}/git.md`). Su contrato está en `${CLAUDE_PLUGIN_ROOT}/city.schema.json`. Para lo propio de la máquina (puertos, versiones, servidores locales, cómo bajar una instalación), ver `docs/harness/entorno.md` del repo si existe; no lo supongas.
 
 ## Chequeos (si uno falla, detente y dilo)
 
@@ -31,10 +31,10 @@ Lee `.city.json` en la raíz del repo (`git rev-parse --show-toplevel`). Si no e
    - "Evidencia": el final de la salida del chequeo 4 y del tamaño.
    - "Veredictos": revisor, seguridad y evaluador, vueltas y pendientes `debería` y `sugerencia`.
    Si alguno quedó en rojo tras 2 vueltas, la primera línea del cuerpo es `**Bloqueado:** <quién y motivo>`.
-3. **Título:** Conventional Commit en español, `<tipo>(<ámbito>): <qué cambia>`; el tipo es `feat` en una rama de `ramas` y el del prefijo en una rama Conventional. Si el repo versiona por título del PR, el tipo define la versión.
+3. **Título** según `git.commits` de `${CLAUDE_SKILL_DIR}/git.md`; sin la clave, Conventional Commit en español.
 4. `gh pr create --base main --label <label> --title "<título>" --body-file <archivo>`. Si el label no existe, dilo; créalo solo si la persona lo confirma.
-5. **Bitácora.** Si el repo tiene `PROGRESO.md` en la raíz, escribe la entrada con su formato y en la ruta que indica, con el número del PR; commit `docs(<ámbito>): bitácora de <id>` y push a la misma rama. Si no existe, no hay bitácora.
-6. **Auto-merge:** `gh pr merge <n> --auto --squash`, salvo que el PR nazca bloqueado. Si el repo no permite auto-merge, dilo; no mergees a mano.
+5. **Bitácora.** Si el repo tiene `PROGRESO.md` en la raíz, escribe la entrada con su formato y en la ruta que indica, con el número del PR; commit con el mensaje de bitácora de `git.md` y push a la misma rama. Si no existe, no hay bitácora.
+6. **Merge** según `git.merge`. Con `auto` (o sin la clave), `gh pr merge <n> --auto --squash`, salvo que el PR nazca bloqueado; si el repo no permite auto-merge, dilo. Con `manual`, no lo actives. Nunca mergees a mano.
 7. **CODEOWNERS.** `gh pr view <n> --json files,reviewRequests`. Si un archivo del PR coincide con un patrón de `codeowners_paths`, el PR queda retenido hasta que lo apruebe una persona: di qué archivos y a quién, según `reviewRequests` o el archivo CODEOWNERS del repo (`.github/`, raíz o `docs/`).
 
 ## Cierre
@@ -43,5 +43,5 @@ Responde en 5 líneas:
 1. PR: URL y título.
 2. Tamaño y ADR.
 3. Revisor y evaluador: veredictos; `passes` y su evidencia, si cambió.
-4. Merge: auto-merge activo, bloqueado (motivo) o retenido por CODEOWNERS (archivos y a quién).
+4. Merge: auto-merge activo, manual (espera la aprobación y el merge de una persona), bloqueado (motivo) o retenido por CODEOWNERS (archivos y a quién).
 5. Bitácora: ruta de la entrada, o "sin bitácora".
