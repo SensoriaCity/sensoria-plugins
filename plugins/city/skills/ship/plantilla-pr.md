@@ -1,7 +1,7 @@
 ## Qué hace
 <Una o dos frases: qué comportamiento nuevo existe y dónde.>
 
-- Funcionalidad: `<id>` en `<features>`
+- Funcionalidad: `<features>/<id>.json`
 - Plan del día: <ruta, o "sin plan">
 - ADR: <ruta, o "no aplica">
 - Flag: <nombre, o "no aplica">

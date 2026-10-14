@@ -161,14 +161,17 @@ printf '{"tope_lineas": 2, "evidencia_dir": "ev"}\n' > "$tmp/.city.json"
 # passes.sh, con cada bash que haya en la máquina (el 3.2 de macOS y el de PATH).
 S="$(pwd)/$CITY/scripts/passes.sh"
 bashes=$( { echo /bin/bash; command -v bash; ls /opt/homebrew/bin/bash /usr/local/bin/bash 2>/dev/null; } | sort -u)
-printf '{"features": "f.json", "evidencia_dir": "ev"}\n' > "$tmp/.city.json"
-printf '[\n  {\n    "id": "S1",\n    "pasos": [\n      "a"\n    ],\n    "passes": false\n  },\n  {\n    "id": "S2",\n    "passes": false\n  }\n]\n' > "$tmp/f.orig"
+ciudad() { printf '{"features": "%s", "evidencia_dir": "ev"}\n' "$1" > "$tmp/.city.json"; }
+mkdir -p "$tmp/f.orig"
+printf '{\n  "id": "S1",\n  "pasos": [\n    "a"\n  ],\n  "passes": false\n}\n' > "$tmp/f.orig/S1.json"
+printf '{\n  "id": "S2",\n  "passes": false\n}\n' > "$tmp/f.orig/S2.json"
+printf '[{"id": "S2", "passes": false}]\n' > "$tmp/viejo.json"
 cabecera='# Evidencia · S2 · 2026-10-03 · abc1234\n\n| Paso | Qué hizo | Resultado |\n|---|---|---|\n| 1 | … | cumple |\n\n## Hallazgos\nNinguno.\n\n'
 passes() { (cd "$tmp" && "$B" "$S" "$@" >/dev/null 2>&1); }
 for B in $bashes; do
   v=$("$B" -c 'echo $BASH_VERSION')
   "$B" -n "$S" || err "passes.sh no compila con bash $v"
-  cp "$tmp/f.orig" "$tmp/f.json"; rm -f "$tmp/ev/S2.md"
+  ciudad f; rm -rf "$tmp/f"; cp -R "$tmp/f.orig" "$tmp/f"; rm -f "$tmp/ev/S2.md" "$tmp/ev/S4.md"
   passes S2 && err "bash $v: passes.sh sin evidencia debería fallar"
   printf "$cabecera" > "$tmp/ev/S2.md"
   passes S2 && err "bash $v: passes.sh con un reporte sin veredicto debería fallar"
@@ -176,17 +179,25 @@ for B in $bashes; do
   passes S2 && err "bash $v: passes.sh con VEREDICTO: no pasa debería fallar"
   printf "$(echo "$cabecera" | sed 's/S2/S1/')VEREDICTO: pasa\n" > "$tmp/ev/S2.md"
   passes S2 && err "bash $v: passes.sh con un reporte de otro id debería fallar"
-  cmp -s "$tmp/f.json" "$tmp/f.orig" || err "bash $v: passes.sh no debería tocar features cuando falla"
   printf "${cabecera}VEREDICTO: pasa\n" > "$tmp/ev/S2.md"
+  ciudad viejo.json
+  passes S2 && err "bash $v: passes.sh con features en un solo archivo debería fallar"
+  ciudad f
+  cp "$tmp/f.orig/S1.json" "$tmp/f/S4.json"; cp "$tmp/f.orig/S1.json" "$tmp/f.orig/S4.json"
+  printf "$(echo "$cabecera" | sed 's/S2/S4/')VEREDICTO: pasa\n" > "$tmp/ev/S4.md"
+  passes S4 && err "bash $v: passes.sh con un archivo cuyo id no es su nombre debería fallar"
+  diff -r "$tmp/f" "$tmp/f.orig" >/dev/null || err "bash $v: passes.sh no debería tocar features cuando falla"
   passes S2 || err "bash $v: passes.sh con un reporte correcto debería cambiar S2"
-  [ "$(diff "$tmp/f.orig" "$tmp/f.json" | grep -c '^[<>]')" -eq 2 ] || err "bash $v: passes.sh debería cambiar una sola línea"
-  [ "$(jq -c '[.[].passes]' "$tmp/f.json")" = "[false,true]" ] || err "bash $v: passes.sh debería cambiar S2 y no S1"
+  [ "$(diff "$tmp/f.orig/S2.json" "$tmp/f/S2.json" | grep -c '^[<>]')" -eq 2 ] || err "bash $v: passes.sh debería cambiar una sola línea"
+  [ "$(jq -r .passes "$tmp/f/S2.json")" = true ] || err "bash $v: passes.sh debería dejar S2 en true"
+  cmp -s "$tmp/f/S1.json" "$tmp/f.orig/S1.json" || err "bash $v: passes.sh debería cambiar S2 y no S1"
   passes S2 || err "bash $v: passes.sh sobre un passes ya en true debería salir con 0"
   passes S3 && err "bash $v: passes.sh con un id que no está en features debería fallar"
-  printf '[{"id": "S1", "passes": false}, {"id": "S2", "passes": false}]\n' > "$tmp/f.json"
-  cp "$tmp/f.json" "$tmp/f.compacto"
-  passes S2 && err "bash $v: passes.sh no debería reformatear un features sin el formato de jq"
-  cmp -s "$tmp/f.json" "$tmp/f.compacto" || err "bash $v: passes.sh no debería tocar un features sin el formato de jq"
+  printf '{"id": "S2", "passes": false}\n' > "$tmp/f/S2.json"
+  cp "$tmp/f/S2.json" "$tmp/S2.compacto"
+  passes S2 && err "bash $v: passes.sh no debería reformatear una funcionalidad sin el formato de jq"
+  cmp -s "$tmp/f/S2.json" "$tmp/S2.compacto" || err "bash $v: passes.sh no debería tocar una funcionalidad sin el formato de jq"
+  rm -f "$tmp/f.orig/S4.json"
 done
 rm -rf "$tmp"
 

@@ -34,7 +34,7 @@ El resumen de quien construyó, la descripción del PR y sus comentarios no son 
 Lee `.city.json` en la raíz de `<repo>` (o del directorio actual, sin `repo`); si no existe, `BLOQUEADO`. De ahí salen `features`, `qa.smoke`, `tests` y, si existe, `tests.postgres`. Para lo propio de la máquina, `docs/harness/entorno.md` del repo si existe.
 
 ## Proceso
-1. **Qué probar:** `jq --arg id "<id>" '.[] | select(.id==$id)' <features>`. Si no existe, `BLOQUEADO`. Cada paso es un criterio. Para saber a qué pantallas o endpoints ir, `cd <repo> && git diff --stat origin/main...HEAD`.
+1. **Qué probar:** `jq . <features>/<id>.json`, en `<repo>` (`features` es una carpeta con un archivo por funcionalidad). Si no existe, `BLOQUEADO`. Cada paso es un criterio. Para saber a qué pantallas o endpoints ir, `cd <repo> && git diff --stat origin/main...HEAD`.
 2. **Paso por paso,** como lo haría el usuario:
    - **UI** con Playwright: llega a la pantalla por la navegación, no por URL directa, y ejecuta el flujo. Verifica el resultado donde se ve; si es un dato guardado, recarga la página y míralo otra vez. Antes de salir de cada página, `browser_console_messages` (errores) y `browser_network_requests` (4xx o 5xx inesperados).
    - **API** con `curl -sS -w '\n%{http_code}\n'` contra `<url>`, con el método, cabeceras y cuerpo que pide el paso. Verifica código y cuerpo, no solo el código.

@@ -29,7 +29,7 @@ Hito: <URL del hito, o "sin hito"> · Flag: <nombre, o "no hace falta">
 - Dependencias: <paquete@versión y la línea exacta que lo instala, que corre una persona, o "ninguna">
 - Estimación: <líneas de código, pruebas y lo generado>
 
-Los pasos de cada corte están en `features`, con su `id`.
+Los pasos de cada corte están en `features`, en el archivo de su `id`.
 
 ## Después
 - <Lo que queda para otra spec, o "nada".>

@@ -32,7 +32,7 @@ Fuera del desarrollo:
 
 ## Reglas
 
-1. **Spec de una página = hito.** La escribe `/city:spec`: cabe en una página y es un hito en Hitos v2. Sus cortes son funcionalidades del archivo `features` de `.city.json`, cada una con pasos verificables y `passes: false`, y entran a `main` en un PR propio antes del primer corte. Un cambio que cabe en una frase no lleva spec.
+1. **Spec de una página = hito.** La escribe `/city:spec`: cabe en una página y es un hito en Hitos v2. Sus cortes son funcionalidades de la carpeta `features` de `.city.json`, un archivo `<id>.json` por corte para que dos specs escritas a la vez no choquen, cada una con pasos verificables y `passes: false`, y entran a `main` en un PR propio antes del primer corte. Un cambio que cabe en una frase no lleva spec.
 2. **Cortes verticales de ≤400 líneas.** Un corte es un vertical slice: un comportamiento que una persona, la API o el CLI pueden observar de punta a punta, que el evaluador prueba solo, con 2 a 5 pasos, en un PR a `main` de máximo `tope_lineas` (400). Se planea con una estimación de máximo el 75 % del tope. Un corte es una funcionalidad: no hay entregas dentro de un id. Una funcionalidad que no es un corte se reemplaza con `/city:spec partir <id>`, que la deja con `reemplazada_por` y agrega los cortes. No se corta por capas y no hay ramas de hito ni PR apilados. Las reglas y la calibración están en `plugins/city/skills/spec/cortes.md`; `/city:spec` las aplica al partir y `/city:build` las vuelve a aplicar en su compuerta, antes de escribir código. El tamaño real se mide solo con `scripts/tamano.sh`, sin lockfiles, `vendor/` ni la evidencia.
 3. **Lo incompleto va tras flag,** no en una rama larga. Un merge a `main` no despliega, pero la versión siguiente lo llevaría.
 4. **Prueba primero.** Cada paso tiene una prueba que falla sin el cambio, escrita antes de implementar. "Listo" es la salida de las pruebas a la vista, no una afirmación.
@@ -48,7 +48,7 @@ Fuera del desarrollo:
 
 | Comando | Quién | Entrada | Qué deja |
 |---|---|---|---|
-| `/city:spec` | Cualquiera, con el PO si es una feature de usuario | objetivo en una frase, documento o URL del hito; o `partir <id>` | Rama `docs/AAAA-MM-DD-spec-<tema>` con la spec en `specs_dir` y sus cortes al final de `features`, cada uno con `spec` y `passes: false`. Revisa cada corte contra `cortes.md` antes de escribirlo. El PR lo abre `/city:ship`. |
+| `/city:spec` | Cualquiera, con el PO si es una feature de usuario | objetivo en una frase, documento o URL del hito; o `partir <id>` | Rama `docs/AAAA-MM-DD-spec-<tema>` con la spec en `specs_dir` y un archivo por corte en `features`, cada uno con `spec` y `passes: false`. Revisa cada corte contra `cortes.md` antes de escribirlo. El PR lo abre `/city:ship`. |
 | `/city:build` | Cualquiera | id de funcionalidad, y el plan del día si lo hay | Rama `<ramas>AAAA-MM-DD-<id>`: compuerta de corte (para con `Bloqueo` si la funcionalidad no es un vertical slice que cabe), prueba primero, implementación, tamaño, ADR, veredictos del `revisor` (y de `seguridad` si aplica) y del `evaluador`. Guarda la evidencia y, si pasa, corre `passes.sh`. |
 | `/city:ship` | Cualquiera | nada | PR a `main` con la plantilla del repo, el `label` y `gh pr merge --auto --squash`. Si CODEOWNERS retiene, dice qué archivos y a quién. |
 | `/city:check` | Quien libera | `<id>`, `hoy` o `semana` | Reporte de solo lectura de 10 minutos: mergeados y versiones, `passes` con evidencia, retenidos, PR en rojo, ADR pendientes, smoke y qué clickear. |

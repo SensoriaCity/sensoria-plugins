@@ -14,7 +14,7 @@ No corres el bucle en esta sesión: dura horas y abre sus propias sesiones de `c
 ## Antes de lanzar
 
 1. `.city.json` en la raíz del repo (`git rev-parse --show-toplevel`); si no existe, detente y dilo. De ahí salen `ramas`, `features`, `evidencia_dir`, `qa.bajar` y `git.merge`. Su contrato: `${CLAUDE_PLUGIN_ROOT}/city.schema.json`.
-2. Cada id existe en `origin/main` con `passes: false` y sin `reemplazada_por` (el bucle construye desde ahí): `git show origin/main:<features> | jq --arg id "<id>" '.[] | select(.id==$id) | {passes, reemplazada_por}'`. Los cortes de una spec son secuenciales: van en orden, c1 antes que c2.
+2. Cada id existe en `origin/main` con `passes: false` y sin `reemplazada_por` (el bucle construye desde ahí): `git show origin/main:<features>/<id>.json | jq '{passes, reemplazada_por}'`. Los cortes de una spec son secuenciales: van en orden, c1 antes que c2.
 3. Ningún PR abierto trae ya ese id (`gh pr list --state open`), ni queda `.claude/worktrees/goal-<id>` de una corrida anterior.
 4. `docker info` responde y no hay otra instalación viva: en la máquina cabe una sola.
 5. Si pasan `--plan`, el archivo existe.

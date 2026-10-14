@@ -55,7 +55,8 @@
     "features": {
       "type": "string",
       "minLength": 1,
-      "description": "Ruta al archivo de funcionalidades con pasos verificables y passes. passes solo cambia con scripts/passes.sh, que exige la evidencia del evaluador con VEREDICTO: pasa."
+      "not": { "pattern": "\\.json$" },
+      "description": "Carpeta de funcionalidades: un archivo <id>.json por funcionalidad, con sus pasos verificables y passes, para que dos ramas no toquen el mismo archivo. passes solo cambia con scripts/passes.sh, que exige la evidencia del evaluador con VEREDICTO: pasa."
     },
     "specs_dir": {
       "type": "string",

@@ -23,7 +23,7 @@ Corres la revisión de un PR fuera de una sesión de build: en el job de CI o a 
 5. **Configuración.** `git show origin/<head>:.city.json`, el mismo que leerá el revisor. Si no existe o no es JSON, para. De ahí salen `ramas` y `features`.
 6. **Id de la funcionalidad.**
    - Si `<head>` es `<ramas>AAAA-MM-DD-<id>`, el id es lo que sigue a la fecha.
-   - Si no, los ids de `git show origin/<head>:<features> | jq -r '.[].id'` que aparecen en el título como palabra entera; si hay varios, el más largo.
+   - Si no, los ids de `git ls-tree --name-only origin/<head> <features>/` (un archivo `<id>.json` por funcionalidad; `<features>` sin barra final) que aparecen en el título como palabra entera; si hay varios, el más largo.
    - El id solo lleva letras, números, `.`, `_` y `-`.
    - Sin id en la rama ni en el título, no paras: el id es `ninguna` y sigues. El revisor revisa lo que no depende de una funcionalidad; la falta de id no decide el veredicto.
 7. **Revisor.** Delega al subagente `city:revisor` con una sola línea y nada más:
