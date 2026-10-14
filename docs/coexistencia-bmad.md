@@ -9,7 +9,7 @@ En `city`, BMAD sigue igual para las squads que todavía no adoptan el método (
 - Las ramas `hito/*` y `tarea/*` y su flujo apilado.
 - Los revisores de GitHub, CodeRabbit y Claude Code Review.
 
-Lo que `city` agrega al repo: `.city.json` en la raíz, el archivo `features` y la carpeta `evidencia_dir` que nombra, `docs/harness/entorno.md`, el job `revisor` de CI y los PR con rama `<ramas>` y label `city`. El ruleset y CODEOWNERS se aplican a todo `main`. Los jobs `revisor` y `evidencia` corren solo en los PR con el label `city`; en los de BMAD quedan saltados, y GitHub cuenta un job saltado como check pasado, así que BMAD no cambia.
+Lo que `city` agrega al repo: `.city.json` en la raíz, las carpetas `features` y `evidencia_dir` que nombra, `docs/harness/entorno.md`, el job `revisor` de CI y los PR con rama `<ramas>` y label `city`. El ruleset y CODEOWNERS se aplican a todo `main`. Los jobs `revisor` y `evidencia` corren solo en los PR con el label `city`; en los de BMAD quedan saltados, y GitHub cuenta un job saltado como check pasado, así que BMAD no cambia.
 
 ## Equivalencias
 

@@ -5,9 +5,11 @@
 # Uso: passes.sh <id>
 # Lee features y evidencia_dir de .city.json en la raíz del repo y exige
 # <evidencia_dir>/<id>.md con el encabezado "# Evidencia · <id> · …" y la
-# última línea "VEREDICTO: pasa". Cambia el passes con jq y solo guarda si
-# el archivo difiere del original en esa única línea. Sale con 0 si lo cambió
-# o ya estaba en true, y con 1 en cualquier otro caso.
+# última línea "VEREDICTO: pasa". features es una carpeta con un archivo
+# <id>.json por funcionalidad, para que dos ramas no toquen el mismo archivo.
+# Cambia el passes con jq y solo guarda si el archivo difiere del original en
+# esa única línea. Sale con 0 si lo cambió o ya estaba en true, y con 1 en
+# cualquier otro caso.
 set -euo pipefail
 
 salir() { echo "passes: $1" >&2; exit 1; }
@@ -35,19 +37,23 @@ ultima=$(awk 'NF { l = $0 } END { print l }' "$evidencia" | tr -d '\r')
 [ "$ultima" = "VEREDICTO: pasa" ] \
   || salir "$evidencia no termina en 'VEREDICTO: pasa' (última línea: '${ultima:-vacía}')"
 
-[ -f "$features" ] || salir "no existe $features"
-jq -e 'type == "array"' "$features" >/dev/null 2>&1 || salir "$features no es una lista de funcionalidades"
-n=$(jq --arg id "$id" '[.[] | select(type == "object" and .id == $id)] | length' "$features")
-[ "$n" -eq 1 ] || salir "$id aparece $n veces en $features"
-actual=$(jq -r --arg id "$id" '.[] | select(type == "object" and .id == $id) | .passes' "$features")
+[ ! -f "$features" ] \
+  || salir "$features es un archivo: features es una carpeta con un <id>.json por funcionalidad (docs/adopcion.md del kit dice cómo pasarlo)"
+[ -d "$features" ] || salir "no existe la carpeta $features"
+archivo="${features%/}/$id.json"
+[ -f "$archivo" ] || salir "no existe $archivo"
+jq -e 'type == "object"' "$archivo" >/dev/null 2>&1 || salir "$archivo no es una funcionalidad"
+dentro=$(jq -r '.id' "$archivo")
+[ "$dentro" = "$id" ] || salir "el id de $archivo no es $id sino '$dentro'"
+actual=$(jq -r '.passes' "$archivo")
 case "$actual" in
-  true) echo "$id: passes ya estaba en true en $features"; exit 0 ;;
+  true) echo "$id: passes ya estaba en true en $archivo"; exit 0 ;;
   false) ;;
-  *) salir "el passes de $id en $features no es false sino '$actual'" ;;
+  *) salir "el passes de $archivo no es false sino '$actual'" ;;
 esac
 
 # Misma sangría que el original, para que el diff sea una sola línea.
-sangria=$(awk 'NR > 1 && /^[ \t]/ { match($0, /^[ \t]+/); print substr($0, 1, RLENGTH); exit }' "$features")
+sangria=$(awk 'NR > 1 && /^[ \t]/ { match($0, /^[ \t]+/); print substr($0, 1, RLENGTH); exit }' "$archivo")
 case "$sangria" in
   *"	"*) formato="--tab" ;;
   *) formato="--indent ${#sangria}" ;;
@@ -57,11 +63,10 @@ esac
 tmp=$(mktemp "${TMPDIR:-/tmp}/passes.XXXXXX")
 trap 'rm -f "$tmp"' EXIT
 # shellcheck disable=SC2086 # $formato son dos palabras a propósito
-jq $formato --arg id "$id" \
-  'map(if type == "object" and .id == $id then .passes = true else . end)' "$features" > "$tmp"
+jq $formato '.passes = true' "$archivo" > "$tmp"
 
-cambios=$(diff "$features" "$tmp" | grep -c '^[<>]' || true)
+cambios=$(diff "$archivo" "$tmp" | grep -c '^[<>]' || true)
 [ "$cambios" -eq 2 ] \
-  || salir "jq cambiaría más que el passes de $id en $features ($cambios líneas): dale formato con jq en un commit aparte"
-cat "$tmp" > "$features"
-echo "$id: passes true en $features"
+  || salir "jq cambiaría más que el passes de $archivo ($cambios líneas): dale formato con jq en un commit aparte"
+cat "$tmp" > "$archivo"
+echo "$id: passes true en $archivo"

@@ -16,8 +16,9 @@ git init -q --bare "$tmp/origin.git"
 git init -q "$tmp/repo"
 (
   cd "$tmp/repo" && git checkout -q -b main \
-    && printf '{"ramas": "feat/", "label": "city", "features": "f.json", "evidencia_dir": "ev"}\n' > .city.json \
-    && printf '[{"id": "S1", "passes": false}, {"id": "S2", "passes": false}]\n' > f.json \
+    && printf '{"ramas": "feat/", "label": "city", "features": "f", "evidencia_dir": "ev"}\n' > .city.json \
+    && mkdir f && printf '{"id": "S1", "passes": false}\n' > f/S1.json \
+    && printf '{"id": "S2", "passes": false}\n' > f/S2.json \
     && git add . && git commit -q -m base \
     && git remote add origin "$tmp/origin.git" && git push -q origin main
 ) || { echo "FALLA: no pude armar el repo de prueba"; exit 1; }

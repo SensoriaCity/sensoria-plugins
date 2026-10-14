@@ -13,13 +13,13 @@ Conviertes un objetivo en una spec de una página y en cortes que `/city:build` 
 
 ## Configuración
 
-Lee `.city.json` en la raíz del repo (`git rev-parse --show-toplevel`). Si no existe, detente y dilo: el kit no sabe nada del stack y no adivina. De ahí salen `features`, `adr_dir`, `tope_lineas`, `codeowners_paths` y `specs_dir` (sin él, `docs/specs`). Su contrato está en `${CLAUDE_PLUGIN_ROOT}/city.schema.json`. Las reglas duras del `CLAUDE.md` del repo mandan sobre esta skill.
+Lee `.city.json` en la raíz del repo (`git rev-parse --show-toplevel`). Si no existe, detente y dilo: el kit no sabe nada del stack y no adivina. De ahí salen `features`, `adr_dir`, `tope_lineas`, `codeowners_paths` y `specs_dir` (sin él, `docs/specs`). `features` es una carpeta con un archivo `<id>.json` por funcionalidad. Su contrato está en `${CLAUDE_PLUGIN_ROOT}/city.schema.json`. Las reglas duras del `CLAUDE.md` del repo mandan sobre esta skill.
 
 ## Reglas duras
 
 - Antes de partir, lee `${CLAUDE_SKILL_DIR}/cortes.md`: las cinco reglas de un corte, cómo partir y la tabla de calibración. Es la parte que más importa de la spec.
 - Un corte es una funcionalidad. No hay entregas, subtareas ni "E1, E2" dentro de un id: si algo necesita partirse, son varias funcionalidades.
-- Nunca editas, reordenas ni borras una funcionalidad que ya está en `features`. Solo agregas al final; la única excepción es la clave `reemplazada_por` de `partir <id>`.
+- Nunca editas, renombras ni borras el archivo de una funcionalidad que ya está en `features`. Solo creas archivos nuevos; la única excepción es la clave `reemplazada_por` de `partir <id>`.
 - No escribes código, migraciones ni pruebas. Tampoco ADR: si hace falta uno, lo dices (paso 5).
 - Lo que nombres (archivos, pruebas, tablas, rutas) existe en el repo o lo crea un corte de esta spec. No lo inventas.
 
@@ -29,7 +29,7 @@ Con `partir <id>`, la entrada es una funcionalidad de `features` con `passes: fa
 
 ## Pasos
 
-1. **Orientación.** `git fetch origin` y rama `docs/AAAA-MM-DD-spec-<tema>` desde `origin/main`. Lee de `features` los ids y las claves de las existentes, los ADR de `adr_dir` que tocan el tema y el código donde va a caer (búscalo con grep).
+1. **Orientación.** `git fetch origin` y rama `docs/AAAA-MM-DD-spec-<tema>` desde `origin/main`. Lee de `features` los ids (`ls <features>`) y las claves de las existentes, los ADR de `adr_dir` que tocan el tema y el código donde va a caer (búscalo con grep).
 
 2. **Preguntas.** Si la entrada no dice quién usa el resultado, qué ve al terminar o qué queda fuera, pregunta antes de escribir, máximo 3 preguntas en un solo mensaje. Sin nadie a quien preguntar, toma la lectura más razonable y anótala en "Supuestos".
 
@@ -41,19 +41,18 @@ Con `partir <id>`, la entrada es una funcionalidad de `features` con `passes: fa
 
 6. **Compuerta.** Antes de tocar `features`, revisa cada corte contra las cinco reglas y la tabla de `cortes.md`, y contra estos límites: máximo 5 pasos; estimación de máximo el 75 % de `tope_lineas`; ningún paso depende de un corte posterior; al menos un paso que una persona, la API o el CLI pueden observar, salvo en el corte de contrato de la regla 5. Si uno falla, vuelve a partir. No lo dejes pasar con una nota.
 
-7. **Funcionalidades.** Agrega los cortes al final de `features`, en el orden de la tabla:
-   - Las mismas claves que las funcionalidades existentes; si no hay ninguna, `id`, `descripcion`, `pasos` y `passes`.
+7. **Funcionalidades.** Crea un archivo `<features>/<id>.json` por corte (`mkdir -p <features>` si la carpeta no existe). Cada corte va en su archivo para que dos specs escritas a la vez no toquen el mismo:
+   - Un objeto con las mismas claves que las funcionalidades existentes; si no hay ninguna, `id`, `descripcion`, `pasos` y `passes`.
    - `"spec": "<ruta de la spec>"` y `"passes": false`.
-   - Ids con el patrón de los existentes, o `<tema>-c01`, `<tema>-c02`…; solo letras, números, punto, guion y guion bajo (lo exige `scripts/passes.sh`).
-   - Con jq y la sangría del archivo (`--indent <n>` o `--tab`), la misma que conserva `scripts/passes.sh`. Antes, `jq <formato> . <features> | cmp -s - <features>`: si difiere, detente; el formato de `features` se arregla en un PR aparte.
-   - Escribe el arreglo nuevo en un archivo temporal fuera del repo y corre `jq <formato> --slurpfile n <temporal> '. + $n[0]' <features> > <temporal 2> && mv <temporal 2> <features>`. Con `partir <id>`, en la misma pasada: `jq <formato> --slurpfile n <temporal> --arg id <id> 'map(if .id == $id then . + {reemplazada_por: ($n[0] | map(.id))} else . end) + $n[0]' <features>`.
+   - Ids con el patrón de los existentes, o `<tema>-c01`, `<tema>-c02`…, en el orden de la tabla: el número dice en qué orden se construyen. Solo letras, números, punto, guion y guion bajo (lo exige `scripts/passes.sh`). Si `<features>/<id>.json` ya existe, cambia el tema del id; no lo sobrescribas.
+   - Escribe cada objeto en un archivo temporal fuera del repo y pásalo por jq, con el formato que conserva `scripts/passes.sh`: `jq --indent 2 . <temporal> > <features>/<id>.json`.
+   - Con `partir <id>`, además: `jq --indent 2 --argjson n '[<ids nuevos, entre comillas>]' '. + {reemplazada_por: $n}' <features>/<id>.json > <temporal> && mv <temporal> <features>/<id>.json`.
 
 8. **Comprueba** con la salida a la vista:
-   - `jq -e 'map(.id) | length == (unique | length)' <features>`: ids únicos.
-   - `git diff origin/main -- <features>`: solo líneas agregadas; con `partir`, además la clave `reemplazada_por` y la coma que la precede.
-   - `jq -e --arg s <ruta de la spec> '[.[] | select(.spec == $s)] | length > 0 and all(.passes == false and (.pasos | length) >= 2 and (.pasos | length) <= 5 and (.id | test("^[A-Za-z0-9_-][A-Za-z0-9._-]*$")))' <features>`: las nuevas, con `passes: false`, `spec`, de 2 a 5 pasos e ids válidos.
+   - `git status --short -uall -- <features>`: solo archivos nuevos (`??`); con `partir`, además el de `<id>` modificado, y `git diff -- <features>/<id>.json` solo agrega la clave `reemplazada_por` y la coma que la precede.
+   - `jq -n -e --arg s <ruta de la spec> '[inputs | select(.spec == $s) | .id as $i | .passes == false and (.pasos | length) >= 2 and (.pasos | length) <= 5 and ($i | test("^[A-Za-z0-9_-][A-Za-z0-9._-]*$")) and (input_filename | endswith("/" + $i + ".json"))] | length > 0 and all' <features>/*.json`: las nuevas, con `passes: false`, `spec`, de 2 a 5 pasos, ids válidos y cada una en el archivo de su id.
 
-9. **Commit** con la spec y `features`, con el mensaje de spec de `${CLAUDE_PLUGIN_ROOT}/skills/ship/git.md` según `git.commits` (sin la clave, `docs(spec): <tema>`). El PR lo abre `/city:ship` en esta sesión (rama `docs/`, sin funcionalidad). Cuando entre a `main`, sigue `/city:goal <ids en orden>` o `/city:build <id>` en una sesión nueva por corte.
+9. **Commit** con la spec y los archivos nuevos de `features`, con el mensaje de spec de `${CLAUDE_PLUGIN_ROOT}/skills/ship/git.md` según `git.commits` (sin la clave, `docs(spec): <tema>`). El PR lo abre `/city:ship` en esta sesión (rama `docs/`, sin funcionalidad). Cuando entre a `main`, sigue `/city:goal <ids en orden>` o `/city:build <id>` en una sesión nueva por corte.
 
 ## Reporte
 

@@ -1,6 +1,6 @@
 ---
 name: build
-description: Construye UNA funcionalidad del archivo features de .city.json en su propia rama, con una compuerta de corte antes de escribir código, prueba primero, verificación con los comandos del repo, tamaño, regla de ADR, veredicto del subagente revisor y del subagente evaluador sobre una instalación limpia. passes solo cambia con scripts/passes.sh y la evidencia del evaluador. Úsala en una sesión nueva por funcionalidad.
+description: Construye UNA funcionalidad de la carpeta features de .city.json en su propia rama, con una compuerta de corte antes de escribir código, prueba primero, verificación con los comandos del repo, tamaño, regla de ADR, veredicto del subagente revisor y del subagente evaluador sobre una instalación limpia. passes solo cambia con scripts/passes.sh y la evidencia del evaluador. Úsala en una sesión nueva por funcionalidad.
 argument-hint: "<id de funcionalidad> [ruta del plan del día]"
 disable-model-invocation: true
 ---
@@ -18,7 +18,7 @@ Lee `.city.json` en la raíz del repo (`git rev-parse --show-toplevel`). Si no e
 ## Reglas duras
 
 - Nunca cambias `passes` a mano ni editas la evidencia del evaluador: la guardas tal cual y `passes` cambia solo con `scripts/passes.sh`.
-- Nunca borras, reordenas ni editas el texto de una funcionalidad en `features`, tampoco para que pase.
+- Nunca borras, renombras ni editas el texto del archivo de una funcionalidad en `features`, tampoco para que pase.
 - Nunca lees, imprimes ni tocas `.env`.
 - Nunca desactivas, saltas ni borras una prueba, ni bajas un umbral para que pase.
 - Una funcionalidad por sesión. La siguiente va en una sesión nueva.
@@ -34,7 +34,7 @@ Lee `.city.json` en la raíz del repo (`git rev-parse --show-toplevel`). Si no e
    - `git status` limpio, `git fetch origin` y `git log --oneline -15 origin/main`. En un worktree, `main` local puede estar atrás: manda `origin/main`.
    - `gh pr list --state open`: si un PR abierto ya trae este id en la rama o el título, sigue en esa rama si es tuya (sesión interrumpida: `git log --oneline origin/main..HEAD` y `git diff origin/main...HEAD`, y continúa desde lo que falta); si es de otra persona, detente.
    - Plan del día, si lo pasaron: léelo. Manda sobre esta skill en alcance, archivos que toca y lo que no se decide solo. Si nombra una dependencia nueva, detente en ese paso: la instala la persona.
-   - La funcionalidad, solo ella: `jq --arg id "<id>" '.[] | select(.id==$id)' <features>`. Si no existe, ya tiene `passes: true` o trae `reemplazada_por`, detente y dilo (en el último caso, con los ids que la reemplazan).
+   - La funcionalidad, solo ella: `jq . <features>/<id>.json` (`features` es una carpeta con un archivo por funcionalidad). Si no existe, ya tiene `passes: true` o trae `reemplazada_por`, detente y dilo (en el último caso, con los ids que la reemplazan).
    - Su spec, si la funcionalidad trae `spec`: lee la sección `### <id>`. Como un plan, manda en alcance ("Toca"), en lo que no se decide solo y en las dependencias. Si plan y spec se contradicen, manda el plan; anótalo en "Decisiones del ejecutor".
 
 2. **Compuerta de corte,** antes de crear la rama y sin escribir código. Un corte es un vertical slice que cabe en `tope_lineas` y que el evaluador prueba solo (`${CLAUDE_PLUGIN_ROOT}/skills/spec/cortes.md`). Detente si:
