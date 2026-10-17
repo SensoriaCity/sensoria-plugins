@@ -44,6 +44,7 @@ Desde la raíz del repo. `caffeinate -i` evita que el Mac se duerma; `goal.md` r
 - `--max-bloqueos N` (2): ids seguidos sin merge, por la razón que sea.
 - Una salida de build con `necesita ADR` o `Bloqueo`, también la de su compuerta de corte, que detiene el bucle antes de escribir código.
 - Docker apagado.
+- `claude` sin sesión. Antes del primer worktree, `goal.sh` prueba `claude -p "Responde solo: ok" --max-turns 1 --tools ""`; si dice `Not logged in` o falla, sale con 2 y pide correr `claude` y `/login`. Si una sesión del bucle dice `Not logged in`, para todo con `claude sin sesión` y borra el worktree que quedó vacío.
 
 Un id también para sin parar el bucle si build no deja su rama, ship no abre PR, el PR queda retenido por CODEOWNERS, nace bloqueado (verde sin auto-merge) o pasan 2 h sin merge.
 
