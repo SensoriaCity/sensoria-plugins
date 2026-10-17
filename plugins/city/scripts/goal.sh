@@ -10,7 +10,8 @@
 # (qa.bajar de .city.json; sin él, Compose con el perfil onprem) y borra el
 # worktree solo si el PR entró. Paradas globales: --max-sesiones sesiones de
 # claude (12), --max-bloqueos ids seguidos sin merge (2), una salida de build
-# con "necesita ADR" o "Bloqueo", y Docker apagado.
+# con "necesita ADR" o "Bloqueo", una sesión con "Not logged in" y Docker
+# apagado. Antes del primer worktree prueba que claude tenga sesión.
 # Log en ${TMPDIR:-/tmp}/city-goal/<fecha>.log; el resumen (goal.md) sale por
 # stdout. Sale con 0 si todos los PR entraron, 1 si no y 2 si no pudo empezar.
 set -uo pipefail
@@ -27,7 +28,7 @@ while [ $# -gt 0 ]; do
     --plan) [ $# -ge 2 ] || uso "--plan pide una ruta"; plan=$2; shift 2 ;;
     --max-sesiones) [ $# -ge 2 ] || uso; entero "$1" "$2"; max_sesiones=$2; shift 2 ;;
     --max-bloqueos) [ $# -ge 2 ] || uso; entero "$1" "$2"; max_bloqueos=$2; shift 2 ;;
-    -h|--help) sed -n '2,15p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,16p' "$0"; exit 0 ;;
     -*) uso "opción desconocida: $1" ;;
     *) case "$1" in .*|*[!A-Za-z0-9._-]*) uso "id inválido: '$1'" ;; esac; ids+=("$1"); shift ;;
   esac
@@ -46,6 +47,16 @@ bajar=$(jq -r '.qa.bajar // empty' .city.json)
 [ -n "$ramas" ] || { echo "goal: .city.json no tiene ramas" >&2; exit 2; }
 if [ "$(jq -r '.git.merge // "auto"' .city.json)" = manual ]; then
   echo "goal: el merge de este repo es manual (git.merge en .city.json) y el bucle necesita auto-merge" >&2
+  exit 2
+fi
+
+# claude con sesión antes del primer worktree: a primera hora la sesión puede
+# haber vencido y cada `claude -p` sale en segundos con "Not logged in". Sin
+# herramientas (--tools ""): con ellas, un turno no alcanza y sale con 1.
+prueba=$(claude -p "Responde solo: ok" --max-turns 1 --tools "" </dev/null 2>&1); rc_prueba=$?
+if [ "$rc_prueba" -ne 0 ] || printf '%s' "$prueba" | grep -qF 'Not logged in'; then
+  echo "goal: claude no tiene sesión (salió con $rc_prueba: $(printf '%s' "$prueba" | head -n1 | cut -c1-120))." >&2
+  echo "goal: corre \`claude\` en una terminal, entra con /login y vuelve a lanzar goal.sh." >&2
   exit 2
 fi
 
@@ -88,6 +99,9 @@ sesion() { # sesion <worktree> <salida> <prompt> [contexto]: corre claude -p y d
   rc=$?
   cat "$2" >>"$log"
   anota "claude salió con $rc (salida en $2)"
+  if grep -qF 'Not logged in' "$2"; then
+    parada="claude sin sesión"; anota "PARADA: $parada: corre \`claude\` y /login"; return 1
+  fi
   return 0
 }
 
@@ -186,6 +200,9 @@ corre_id() { # corre_id <id>: deja pr, estado, pasos y motivo
   if [ "$estado" = MERGED ]; then
     git worktree remove --force "$wt" >>"$log" 2>&1 || anota "no pude borrar $wt"
     git branch -D "$rama" >>"$log" 2>&1
+  elif [ "$parada" = "claude sin sesión" ] && [ -z "$rama" ]; then
+    # build no llegó a correr: el worktree quedó vacío y bloquearía la corrida siguiente.
+    git worktree remove "$wt" >>"$log" 2>&1 || anota "no pude borrar $wt"
   fi
 }
 

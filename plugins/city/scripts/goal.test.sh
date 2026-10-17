@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Prueba en seco de goal.sh con claude, gh y docker falsos en el PATH, sobre un
 # repo de prueba con su origin. Recorre dos ids: S1 entra (build, ship, checks
-# en verde, merge) y S2 para por "Bloqueo" en la salida de build. Corre goal.sh
+# en verde, merge) y S2 para por "Bloqueo" en la salida de build. Luego, claude
+# sin sesión: antes del primer worktree y en la salida de build. Corre goal.sh
 # con el mismo bash que corre esta prueba. Sale con 0 si todo cumple.
 set -uo pipefail
 
@@ -33,6 +34,9 @@ while [ \$# -gt 0 ]; do
   shift
 done
 echo "claude \$modo \$prompt" >> "$L"
+case "\${SIN_SESION:-}:\$prompt" in
+  todo:*|build:/city:build*) echo "Not logged in · Please run /login"; exit 1 ;;
+esac
 case "\$prompt" in
   "/city:build S1"*)
     git switch -q -c "feat/\$(date +%Y-%m-%d)-S1" && mkdir -p ev
@@ -67,7 +71,8 @@ echo "$salida" | grep -qF '| S1 | #7 | MERGED | 2/2 cumplen · pasa | entró |' 
 echo "$salida" | grep -qF '| S2 | — | sin PR | — | Bloqueo: falta el usuario de prueba |' || falla "S2 debería parar por Bloqueo sin PR"
 echo "$salida" | grep -qF 'Parada global: build de S2: Bloqueo' || falla "el Bloqueo de S2 debería ser parada global"
 echo "$salida" | grep -qF '/city:check' || falla "el resumen debería terminar en /city:check"
-[ "$(grep -c '^claude ' "$L")" -eq 3 ] || falla "debería haber 3 sesiones de claude: build S1, ship S1 y build S2"
+[ "$(head -n1 "$L")" = "claude  Responde solo: ok" ] || falla "lo primero debería ser la prueba de sesión de claude"
+[ "$(grep -c '^claude auto ' "$L")" -eq 3 ] || falla "debería haber 3 sesiones de claude: build S1, ship S1 y build S2"
 grep -q '^claude auto /city:build S1$' "$L" || falla "build S1 debería correr con --permission-mode auto"
 grep -q '^claude auto /city:ship$' "$L" || falla "ship debería correr con --permission-mode auto"
 [ "$(grep -c '^claude auto /city:ship' "$L")" -eq 1 ] || falla "S2 no debería llegar a ship"
@@ -80,6 +85,28 @@ git -C "$tmp/repo" worktree list | grep -q 'goal-S1' && falla "git todavía list
 [ -z "$(git -C "$tmp/repo" branch --list 'feat/*-S1')" ] || falla "la rama local de S1 debería borrarse tras el merge"
 ls "$tmp"/t/city-goal/*.log >/dev/null 2>&1 || falla "el log debería quedar en \$TMPDIR/city-goal"
 [ -z "$(git -C "$tmp/repo" status --porcelain -- . ':!.claude')" ] || falla "goal.sh no debería dejar archivos en el repo"
+
+# Sin sesión de claude, goal.sh no arranca: ni worktrees ni ids.
+: > "$L"
+salida_ss=$(cd "$tmp/repo" && PATH="$tmp/bin:$PATH" TMPDIR="$tmp/t" SIN_SESION=todo "$BASH" "$G" S3 S4 2>"$tmp/stderr-ss")
+rc=$?
+[ "$rc" -eq 2 ] || falla "sin sesión de claude debería salir con 2 (salió con $rc)"
+grep -q '/login' "$tmp/stderr-ss" || falla "sin sesión de claude debería pedir /login"
+[ -z "$salida_ss" ] || falla "sin sesión de claude no debería escribir resumen"
+grep -q '^claude auto ' "$L" && falla "sin sesión de claude no debería abrir sesiones de build ni ship"
+grep -q '^docker ' "$L" && falla "sin sesión de claude no debería llegar a ningún id"
+[ ! -e "$tmp/repo/.claude/worktrees/goal-S3" ] || falla "sin sesión de claude no debería crear worktrees"
+
+# Si una sesión dice "Not logged in", es parada global y no fallo del id.
+: > "$L"
+salida_sb=$(cd "$tmp/repo" && PATH="$tmp/bin:$PATH" TMPDIR="$tmp/t" SIN_SESION=build "$BASH" "$G" S3 S4 2>"$tmp/stderr-sb")
+rc=$?
+[ "$rc" -eq 1 ] || falla "con build sin sesión debería salir con 1 (salió con $rc)"
+echo "$salida_sb" | grep -qF 'Parada global: claude sin sesión.' || falla "Not logged in en build debería ser parada global"
+echo "$salida_sb" | grep -qF '| S3 | — | sin PR | — | claude sin sesión |' || falla "S3 debería decir claude sin sesión"
+echo "$salida_sb" | grep -qF '| S4 | — | sin correr | — | no corrió: claude sin sesión |' || falla "S4 no debería correr"
+[ "$(grep -c '^claude auto ' "$L")" -eq 1 ] || falla "tras Not logged in no debería abrir más sesiones"
+[ ! -e "$tmp/repo/.claude/worktrees/goal-S3" ] || falla "el worktree vacío de S3 debería borrarse"
 
 # Con git.merge manual, goal.sh no arranca ni abre sesiones.
 : > "$L"
@@ -94,4 +121,4 @@ if [ "$fallas" -gt 0 ]; then
   echo "--- stdout"; echo "$salida"; echo "--- stderr"; cat "$tmp/stderr"; echo "--- llamadas"; cat "$L"
   exit 1
 fi
-echo "goal.sh en seco: 2 ids, uno entra y otro para por Bloqueo (bash $BASH_VERSION)"
+echo "goal.sh en seco: 2 ids, uno entra y otro para por Bloqueo; claude sin sesión antes y durante (bash $BASH_VERSION)"
