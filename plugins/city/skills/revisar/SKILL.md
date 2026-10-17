@@ -26,10 +26,11 @@ Corres la revisión de un PR fuera de una sesión de build: en el job de CI o a 
    - Si no, los ids de `git ls-tree --name-only origin/<head> <features>/` (un archivo `<id>.json` por funcionalidad; `<features>` sin barra final) que aparecen en el título como palabra entera; si hay varios, el más largo.
    - El id solo lleva letras, números, `.`, `_` y `-`.
    - Sin id en la rama ni en el título, no paras: el id es `ninguna` y sigues. El revisor revisa lo que no depende de una funcionalidad; la falta de id no decide el veredicto.
-7. **Revisor.** Delega al subagente `city:revisor` con una sola línea y nada más:
+7. **Revisor.** Delega al subagente `city:revisor` en primer plano (`run_in_background: false`): su respuesta vuelve en la misma llamada. Le pasas una sola línea y nada más:
    `<id> · origin/<head> · origin/<base>`
    Sin id, `ninguna · origin/<head> · origin/<base>`. Ni el título, ni el cuerpo, ni tu resumen.
 8. **Resultado.**
+   - Si la llamada no devolvió la respuesta del revisor (por ejemplo, avisa que quedó en segundo plano), `veredicto.txt` dice `Veredicto: no mergear` y `veredicto.md`, `revisar: el revisor no devolvió respuesta`. No cierres el turno esperándolo.
    - `veredicto.md`: la respuesta del revisor tal cual, sin agregar ni quitar una línea.
    - `veredicto.txt`: una sola línea, según la última línea con texto de esa respuesta. Si empieza por `Veredicto: listo para merge`, exactamente `Veredicto: listo para merge`; si empieza por `Veredicto: no mergear`, exactamente `Veredicto: no mergear`.
    - Si no es ninguna de las dos, `veredicto.txt` dice `Veredicto: no mergear` y al final de `veredicto.md` agregas `revisar: el revisor no terminó con un veredicto`.

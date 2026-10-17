@@ -90,6 +90,11 @@ jobs:
       - uses: anthropics/claude-code-action@v1
         env:
           GH_TOKEN: ${{ github.token }}
+          # Subagentes en primer plano. En segundo plano la sesión cierra su
+          # turno al lanzar city:revisor, la acción se queda con ese primer
+          # `result` (run-claude-sdk.ts corta en él) y termina antes de que
+          # exista veredicto.txt.
+          CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1"
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ github.token }}
@@ -106,7 +111,7 @@ jobs:
 
 - `CLAUDE_CODE_OAUTH_TOKEN` sale de `claude setup-token`; `CITY_AIDD_TOKEN` es un token de solo lectura de `SensoriaCity/sensoria-plugins` (el secreto conserva el nombre de cuando el repo se llamaba `city-aidd`). Ninguno da acceso a un entorno.
 - El job no recibe el cuerpo ni los comentarios del PR: la skill lee solo rama, base y título, y el revisor recibe una línea.
-- Si falta `veredicto.txt` (la sesión se cortó o llegó a `--max-turns`), el último paso falla y el PR no entra.
+- Si falta `veredicto.txt` (la sesión se cortó, llegó a `--max-turns` o dejó al revisor en segundo plano), el último paso falla y el PR no entra. `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS` evita lo último: `claude-code-action` termina en el primer `result` de la sesión, y con el revisor en segundo plano ese `result` llega antes que su respuesta.
 - Las pruebas que corre el revisor necesitan las dependencias del repo en el runner; si no están, las reporta como "no corrido". `--allowedTools` en `claude_args` les da a la skill y al revisor las herramientas que usan sin pedir permiso en CI; la skill además las acota en su `allowed-tools`.
 
 ## Las cuatro capas que sostienen el auto-merge
