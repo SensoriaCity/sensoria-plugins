@@ -33,16 +33,22 @@
     },
     "qa": {
       "type": "object",
-      "description": "Instalación local limpia donde el evaluador prueba como usuario.",
+      "description": "Instalación local limpia donde el evaluador prueba como usuario. url, instalar y puerto pueden nombrar variables del entorno como ${VAR} o ${VAR:-valor}. En el lab, goal.sh toma un slot N de 1 a 3 y exporta a sus sesiones CITY_SLOT=N, CITY_HTTP_PORT=808N, CITY_MAILPIT_PORT=802(5+N) y CITY_BASE_DOMAIN=sN.city.localhost; sin slot (una sesión a mano) no existen y vale lo que va después de :-. instalar lo expande la shell; url y puerto, scripts/qa.py, que no ejecuta nada más.",
       "additionalProperties": false,
       "required": ["url", "instalar", "smoke"],
       "dependentRequired": { "usuario": ["usuario_stdin"], "usuario_stdin": ["usuario"] },
       "properties": {
-        "url": { "type": "string", "format": "uri", "description": "URL base de la app en la instalación local, con el puerto de la instalación: localhost, 127.0.0.1, *.localhost o *.test que resuelve solo a 127.0.0.1. El evaluador la confirma con scripts/entorno-qa.py antes de tocar nada." },
-        "instalar": { "type": "string", "minLength": 1, "description": "Comando que levanta la instalación desde cero, con sus variables de entorno." },
+        "url": { "type": "string", "minLength": 1, "description": "URL base de la app en la instalación local, con el puerto de la instalación: localhost, 127.0.0.1, *.localhost o *.test que resuelve solo a 127.0.0.1. Con slots, nombra sus variables, p. ej. http://app.${CITY_BASE_DOMAIN:-city.localhost}:${CITY_HTTP_PORT:-8080}. build la expande con scripts/qa.py url y el evaluador la confirma con scripts/entorno-qa.py antes de tocar nada." },
+        "instalar": { "type": "string", "minLength": 1, "description": "Comando que levanta la instalación desde cero, con sus variables de entorno. Con slots, el puerto va como CITY_HTTP_PORT=${CITY_HTTP_PORT:-8080}: un valor fijo contradice al slot." },
         "smoke": { "type": "string", "minLength": 1, "description": "Comando que verifica la instalación antes de que el evaluador empiece." },
-        "bajar": { "type": "string", "minLength": 1, "description": "Opcional. Comando que baja la instalación y sus volúmenes desde la raíz del worktree. goal.sh lo corre al terminar cada id; sin él, docker compose --profile onprem down -v --remove-orphans." },
-        "puerto": { "type": "integer", "minimum": 1, "maximum": 65535, "description": "Puerto HTTP de la instalación, cuando difiere del de producción (Herd ocupa 80 y 443)." },
+        "bajar": { "type": "string", "minLength": 1, "description": "Opcional. Comando que baja la instalación y sus volúmenes desde la raíz del worktree, solo la de su slot (recibe CITY_SLOT). goal.sh lo corre al terminar cada id; sin él, docker compose --profile onprem down -v --remove-orphans, y solo si el .env del worktree trae COMPOSE_PROJECT_NAME: sin él, Compose bajaría el proyecto por omisión, que puede ser de otro slot o de la sesión a mano." },
+        "puerto": {
+          "description": "Puerto HTTP de la instalación, cuando difiere del de producción (Herd ocupa 80 y 443): un número, o con slots la variable con su valor sin slot, como \"${CITY_HTTP_PORT:-8080}\". scripts/qa.py lo agrega a url si esta no trae puerto.",
+          "oneOf": [
+            { "type": "integer", "minimum": 1, "maximum": 65535 },
+            { "type": "string", "pattern": "^\\$\\{[A-Za-z_][A-Za-z0-9_]*:-[0-9]{1,5}\\}$" }
+          ]
+        },
         "usuario": { "type": "string", "minLength": 1, "description": "Opcional. Comando que crea el usuario de prueba en la instalación leyendo sus datos de la entrada estándar, una línea por elemento de usuario_stdin. build lo corre después de instalar y le pasa al evaluador correo y contraseña." },
         "usuario_stdin": {
           "type": "array",

@@ -24,11 +24,10 @@
   },
   "tope_lineas": 400,
   "qa": {
-    "url": "http://app.city.localhost:8080",
-    "instalar": "CITY_HTTP_PORT=8080 bin/city install --lab",
+    "url": "http://app.${CITY_BASE_DOMAIN:-city.localhost}:${CITY_HTTP_PORT:-8080}",
+    "instalar": "CITY_HTTP_PORT=${CITY_HTTP_PORT:-8080} bin/city install --lab",
     "smoke": "bin/city smoke",
-    "bajar": "docker compose --profile onprem down -v --remove-orphans",
-    "puerto": 8080,
+    "puerto": "${CITY_HTTP_PORT:-8080}",
     "usuario": "bin/city steward",
     "usuario_stdin": ["correo", "correo", "nombre", "contraseña", "contraseña"]
   },

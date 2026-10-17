@@ -3,8 +3,10 @@
 # repo de prueba con su origin. Recorre dos ids: S1 entra (build, ship, checks
 # en verde, merge) y S2 para por "Bloqueo" en la salida de build. Luego, la
 # guarda del auto-merge (rutas de dueños, renombrados y reintento) y claude
-# sin sesión: antes del primer worktree y en la salida de build. Corre goal.sh
-# con el mismo bash que corre esta prueba. Sale con 0 si todo cumple.
+# sin sesión: antes del primer worktree y en la salida de build. Después, los
+# slots del lab (toma, recuperación de un PID muerto, sin slot libre, suelta
+# al salir), el reclamo de ids y un PR atrás de main, con y sin conflicto.
+# Corre goal.sh con el mismo bash que corre esta prueba. Sale con 0 si todo cumple.
 set -uo pipefail
 
 G="$(cd "$(dirname "$0")" && pwd)/goal.sh"
@@ -41,6 +43,7 @@ while [ $# -gt 0 ]; do
   shift
 done
 echo "claude $modo $prompt" >> "$L"
+[ -z "$modo" ] || echo "env ${CITY_SLOT-sin} ${CITY_HTTP_PORT-sin} ${CITY_MAILPIT_PORT-sin} ${CITY_BASE_DOMAIN-sin} ${CITY_IMAGE-sin} ${COMPOSE_PROJECT_NAME-sin}" >> "$L"
 [ "$prompt" != /city:ship ] || echo "ship-extra $extra" >> "$L"
 texto() {
   case "${SIN_SESION:-}:$prompt" in
@@ -51,9 +54,10 @@ texto() {
       git switch -q -c "feat/$(date +%Y-%m-%d)-S1" && mkdir -p ev
       printf '# Evidencia · S1 · hoy · abc\n\n| Paso | Qué hizo | Resultado |\n|---|---|---|\n| 1 | a | cumple |\n| 2 | b | cumple |\n\nVEREDICTO: pasa\n' > ev/S1.md
       git add ev && git commit -q -m "test(s1): evidencia de S1"
+      printf 'APP_KEY=x\nCOMPOSE_PROJECT_NAME=city-s%s\n' "$CITY_SLOT" > .env
       echo "7. Siguiente paso: /city:ship en esta sesión." ;;
     "/city:build S2"*) echo "Bloqueo: falta el usuario de prueba" ;;
-    "/city:build S6"*|"/city:build S7"*|"/city:build S8"*)
+    "/city:build S6"*|"/city:build S7"*|"/city:build S8"*|"/city:build B1"*|"/city:build B2"*)
       id=${prompt#/city:build }; id=${id%% *}
       git switch -q -c "feat/$(date +%Y-%m-%d)-$id" 2>/dev/null || true
       echo "7. Siguiente paso: /city:ship en esta sesión." ;;
@@ -79,10 +83,20 @@ cat > "$tmp/bin/gh" <<EOF
 #!/bin/sh
 echo "gh \$*" >> "$L"
 # PR 7 (S1) entra; 8 (S6) toca docs/adr; 9 (S7) renombra desde docker/; 10 (S8)
-# sigue abierto con un check en rojo.
+# sigue abierto con un check en rojo; 11 (B1) queda atrás de main y entra tras
+# update-branch; 12 (B2) queda atrás con conflicto.
 case "\$1 \$2" in
-  "pr list") case "\$*" in *-S1*) echo 7 ;; *-S6*) echo 8 ;; *-S7*) echo 9 ;; *-S8*) echo 10 ;; esac ;;
+  "pr list") case "\$*" in *-S1*) echo 7 ;; *-S6*) echo 8 ;; *-S7*) echo 9 ;; *-S8*) echo 10 ;;
+      *-B1*) echo 11 ;; *-B2*) echo 12 ;; esac ;;
+  "pr update-branch") case "\$*" in
+      *" 11"*) touch "$tmp/actualizado-11" ;;
+      *) echo "merge conflict between base and head" >&2; exit 1 ;;
+    esac ;;
   "pr view") case "\$*" in
+      *" 11 "*mergeStateStatus*) if [ -e "$tmp/actualizado-11" ]; then echo BLOCKED; else echo BEHIND; fi ;;
+      *" 11 "*state*) if [ -e "$tmp/actualizado-11" ]; then echo MERGED; else echo OPEN; fi ;;
+      *" 12 "*mergeStateStatus*) echo BEHIND ;;
+      *" 12 "*state*) echo OPEN ;;
       *headRefOid*) echo abc1234def ;;
       *autoMergeRequest*) echo true ;;
       *" 10 "*) echo OPEN ;;
@@ -104,7 +118,7 @@ EOF
 chmod +x "$tmp/bin/claude" "$tmp/bin/gh" "$tmp/bin/docker"
 
 salida=$(cd "$tmp/repo" && PATH="$tmp/bin:$PATH" TMPDIR="$tmp/t" GOAL_INTERVALO=1 GOAL_ESPERA_MAX=5 \
-  "$BASH" "$G" S1 S2 2>"$tmp/stderr")
+  COMPOSE_PROJECT_NAME=city "$BASH" "$G" S1 S2 2>"$tmp/stderr")
 rc=$?
 
 [ "$rc" -eq 1 ] || falla "con S2 sin merge debería salir con 1 (salió con $rc)"
@@ -123,8 +137,15 @@ grep -qx 'gh pr merge 7 --auto --squash --match-head-commit abc1234def' "$L" \
 [ "$(grep -n '^gh pr merge 7 --auto' "$L" | cut -d: -f1)" -gt "$(grep -n '^claude auto /city:ship' "$L" | cut -d: -f1)" ] \
   || falla "el auto-merge debería activarse después de ship"
 grep -q '^ship-extra .*No actives el auto-merge' "$L" || falla "ship debería recibir que no active el auto-merge"
-[ "$(grep -c '^docker compose --profile onprem down -v --remove-orphans$' "$L")" -eq 2 ] \
-  || falla "debería bajar la instalación de cada id"
+[ "$(grep -c '^docker compose --profile onprem down -v --remove-orphans$' "$L")" -eq 1 ] \
+  || falla "debería bajar solo la instalación de S1, cuyo .env nombra su proyecto"
+grep -qF 'el .env de goal-S2 no nombra COMPOSE_PROJECT_NAME: no bajo nada' "$tmp/stderr" \
+  || falla "sin COMPOSE_PROJECT_NAME en el .env de S2 no debería bajar nada"
+[ "$(grep '^env ' "$L" | sort -u)" = "env 1 8081 8026 s1.city.localhost sin sin" ] \
+  || falla "cada sesión debería recibir el slot 1 con sus puertos y dominio, sin CITY_IMAGE ni COMPOSE_PROJECT_NAME"
+echo "$salida" | grep -qF 'Slot: s1 (s1.city.localhost:8081).' || falla "el resumen debería decir el slot"
+[ -z "$(find "$tmp/t/city-goal/slots" "$tmp/t/city-goal/ids" -mindepth 1)" ] || falla "al salir debería soltar su slot y sus ids"
+grep -q '^gh pr update-branch' "$L" && falla "un PR al día no debería pedir update-branch"
 [ ! -e "$tmp/repo/.claude/worktrees/goal-S1" ] || falla "el worktree de S1 debería borrarse: su PR entró"
 [ -d "$tmp/repo/.claude/worktrees/goal-S2" ] || falla "el worktree de S2 debería quedar: su PR no entró"
 git -C "$tmp/repo" worktree list | grep -q 'goal-S1' && falla "git todavía lista el worktree de S1"
@@ -210,6 +231,74 @@ if [ "$(uname)" = Darwin ]; then
   git -C "$tmp/repo" worktree remove --force "$tmp/repo/.claude/worktrees/goal-S2"
 fi
 
+# Slots: s1 es de un bucle vivo (esta prueba) y s2 de un PID muerto: toma s2.
+: > "$L"
+sl="$tmp/sl/city-goal/slots"; mkdir -p "$sl/s1" "$sl/s2"
+echo "$$" > "$sl/s1/pid"
+sleep 0 & muerto=$!; wait "$muerto"
+echo "$muerto" > "$sl/s2/pid"
+salida_sl=$(cd "$tmp/repo" && PATH="$tmp/bin:$PATH" TMPDIR="$tmp/sl" "$BASH" "$G" S2 --quiet 2>"$tmp/stderr-sl")
+echo "$salida_sl" | grep -qF 'Slot: s2 (s2.city.localhost:8082).' || falla "debería recuperar s2, cuyo PID murió"
+[ "$(grep '^env ' "$L" | sort -u)" = "env 2 8082 8027 s2.city.localhost sin sin" ] \
+  || falla "las sesiones en s2 deberían recibir 8082, 8027 y s2.city.localhost"
+[ "$(cat "$sl/s1/pid" 2>/dev/null)" = "$$" ] || falla "no debería tocar s1, que es de un bucle vivo"
+[ ! -e "$sl/s2" ] || falla "al salir debería soltar s2"
+git -C "$tmp/repo" worktree remove --force "$tmp/repo/.claude/worktrees/goal-S2"
+
+# Sin slot libre (s3 recién creado y aún sin PID cuenta como ocupado), no arranca.
+: > "$L"
+mkdir -p "$sl/s2" "$sl/s3"; echo "$$" > "$sl/s2/pid"
+salida_ns=$(cd "$tmp/repo" && PATH="$tmp/bin:$PATH" TMPDIR="$tmp/sl" "$BASH" "$G" S2 2>"$tmp/stderr-ns")
+rc=$?
+[ "$rc" -eq 2 ] || falla "sin slot libre debería salir con 2 (salió con $rc)"
+grep -qF 'no hay slot libre' "$tmp/stderr-ns" || falla "sin slot libre debería decirlo"
+[ -z "$salida_ns" ] || falla "sin slot libre no debería escribir resumen"
+[ ! -s "$L" ] || falla "sin slot libre no debería llamar a claude, gh ni docker"
+[ -d "$sl/s3" ] && [ "$(cat "$sl/s1/pid" "$sl/s2/pid")" = "$$
+$$" ] || falla "sin slot libre no debería tocar los slots de otros"
+
+# Con TERM a media sesión, suelta su slot y su id al salir.
+mkdir -p "$tmp/tm"
+(cd "$tmp/repo" && PATH="$tmp/bin:$PATH" TMPDIR="$tmp/tm" PAUSA=2 exec "$BASH" "$G" S2 >/dev/null 2>&1) &
+goal_pid=$!
+for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+  [ -e "$tmp/tm/city-goal/ids/S2/pid" ] && break; sleep 0.2
+done
+kill -TERM "$goal_pid"; wait "$goal_pid"
+rc=$?
+[ "$rc" -eq 143 ] || falla "con TERM debería salir con 143 (salió con $rc)"
+[ -z "$(find "$tmp/tm/city-goal/slots" "$tmp/tm/city-goal/ids" -mindepth 1)" ] || falla "con TERM debería soltar su slot y su id"
+git -C "$tmp/repo" worktree remove --force "$tmp/repo/.claude/worktrees/goal-S2"
+
+# Reclamo de ids: S2 de un bucle vivo no corre; uno de un PID muerto se recupera.
+: > "$L"
+mkdir -p "$tmp/id/city-goal/ids/S2"; echo "$$" > "$tmp/id/city-goal/ids/S2/pid"
+salida_id=$(cd "$tmp/repo" && PATH="$tmp/bin:$PATH" TMPDIR="$tmp/id" "$BASH" "$G" S2 --quiet 2>/dev/null)
+rc=$?
+[ "$rc" -eq 1 ] || falla "con el id de otro bucle debería salir con 1 (salió con $rc)"
+echo "$salida_id" | grep -qF '| S2 | — | sin correr | — | lo construye otro bucle |' || falla "S2 de otro bucle no debería correr"
+grep -q '^claude auto ' "$L" && falla "S2 de otro bucle no debería abrir sesiones"
+[ "$(cat "$tmp/id/city-goal/ids/S2/pid")" = "$$" ] || falla "no debería soltar el id de otro bucle"
+echo "$muerto" > "$tmp/id/city-goal/ids/S2/pid"
+(cd "$tmp/repo" && PATH="$tmp/bin:$PATH" TMPDIR="$tmp/id" "$BASH" "$G" S2 --quiet >/dev/null 2>&1)
+grep -q '^claude auto /city:build S2$' "$L" || falla "el id de un PID muerto debería recuperarse y correr"
+[ ! -e "$tmp/id/city-goal/ids/S2" ] || falla "al terminar S2 debería soltar su id"
+git -C "$tmp/repo" worktree remove --force "$tmp/repo/.claude/worktrees/goal-S2"
+
+# Atrás de main: B1 pide update-branch, vuelve a esperar los checks y entra; B2
+# tiene conflicto, para con "conflicto con main" y deja su worktree.
+: > "$L"
+salida_b=$(cd "$tmp/repo" && PATH="$tmp/bin:$PATH" TMPDIR="$tmp/b" GOAL_INTERVALO=1 GOAL_ESPERA_MAX=5 \
+  "$BASH" "$G" B1 B2 --quiet 2>/dev/null)
+echo "$salida_b" | grep -qF '| B1 | #11 | MERGED | — | entró |' || falla "B1 debería entrar tras update-branch"
+grep -qx 'gh pr update-branch 11' "$L" || falla "B1 atrás de main debería pedir gh pr update-branch"
+upd=$(grep -n '^gh pr update-branch 11' "$L" | cut -d: -f1)
+[ "$(grep -n '^gh pr checks 11 --watch' "$L" | tail -n1 | cut -d: -f1)" -gt "${upd:-999}" ] \
+  || falla "tras update-branch debería volver a esperar los checks de B1"
+echo "$salida_b" | grep -qF '| B2 | #12 | OPEN | — | conflicto con main |' || falla "B2 debería parar con conflicto con main"
+[ -d "$tmp/repo/.claude/worktrees/goal-B2" ] || falla "B2 con conflicto debería dejar su worktree"
+git -C "$tmp/repo" worktree remove --force "$tmp/repo/.claude/worktrees/goal-B2"
+
 # Sin sesión de claude, goal.sh no arranca: ni worktrees ni ids.
 : > "$L"
 salida_ss=$(cd "$tmp/repo" && PATH="$tmp/bin:$PATH" TMPDIR="$tmp/t" SIN_SESION=todo "$BASH" "$G" S3 S4 2>"$tmp/stderr-ss")
@@ -245,4 +334,4 @@ if [ "$fallas" -gt 0 ]; then
   echo "--- stdout"; echo "$salida"; echo "--- stderr"; cat "$tmp/stderr"; echo "--- llamadas"; cat "$L"
   exit 1
 fi
-echo "goal.sh en seco: 2 ids, uno entra y otro para por Bloqueo; guarda del auto-merge; --quiet; stream sin result; claude sin sesión antes y durante (bash $BASH_VERSION)"
+echo "goal.sh en seco: 2 ids, uno entra y otro para por Bloqueo; guarda del auto-merge; --quiet; stream sin result; slots, ids y ramas atrás de main; claude sin sesión antes y durante (bash $BASH_VERSION)"

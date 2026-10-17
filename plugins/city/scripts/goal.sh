@@ -2,13 +2,18 @@
 # Bucle por objetivo: build → ship → checks → merge, una funcionalidad a la vez
 # y sin nadie mirando. Compatible con el bash 3.2 de macOS.
 # Uso: goal.sh <id>... [--plan <ruta>] [--max-sesiones N] [--max-bloqueos N] [--quiet]
-# Corre desde la raíz del repo. Por cada id, en orden: worktree nuevo desde
+# Corre desde la raíz del repo. Toma un slot libre del lab, s1 a s3 (sin slot
+# libre no arranca), y exporta a sus sesiones CITY_SLOT, CITY_HTTP_PORT (808N),
+# CITY_MAILPIT_PORT (802(5+N)) y CITY_BASE_DOMAIN (sN.city.localhost). Reclama
+# cada id para que otro bucle no lo construya. Por cada id, en orden: worktree nuevo desde
 # origin/main en .claude/worktrees/goal-<id>; ahí `claude -p "/city:build <id>
 # [plan]"` y, sin bloqueo, `claude -p "/city:ship"`; si ningún archivo del PR
-# cae en codeowners_paths, activa su auto-merge; espera los checks y el merge.
+# cae en codeowners_paths, activa su auto-merge; espera los checks y el merge,
+# y trae main a la rama si queda atrás (con conflicto, para ese id).
 # Si un check falla, quita el auto-merge y reintenta build y ship en la misma
 # rama; al segundo fallo, para ese id. Al terminar cada id baja la instalación
-# (qa.bajar de .city.json; sin él, Compose con el perfil onprem) y borra el
+# (qa.bajar de .city.json; sin él, Compose con el perfil onprem, solo si el
+# .env del worktree nombra su proyecto) y borra el
 # worktree solo si el PR entró. Paradas globales: --max-sesiones sesiones de
 # claude (12), --max-bloqueos ids seguidos sin merge (2), una salida de build
 # con "necesita ADR" o "Bloqueo", una sesión con "Not logged in" y Docker
@@ -32,7 +37,7 @@ while [ $# -gt 0 ]; do
     --max-sesiones) [ $# -ge 2 ] || uso; entero "$1" "$2"; max_sesiones=$2; shift 2 ;;
     --max-bloqueos) [ $# -ge 2 ] || uso; entero "$1" "$2"; max_bloqueos=$2; shift 2 ;;
     --quiet) quiet=1; shift ;;
-    -h|--help) sed -n '2,19p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,24p' "$0"; exit 0 ;;
     -*) uso "opción desconocida: $1" ;;
     *) case "$1" in .*|*[!A-Za-z0-9._-]*) uso "id inválido: '$1'" ;; esac; ids+=("$1"); shift ;;
   esac
@@ -53,6 +58,51 @@ if [ "$(jq -r '.git.merge // "auto"' .city.json)" = manual ]; then
   echo "goal: el merge de este repo es manual (git.merge en .city.json) y el bucle necesita auto-merge" >&2
   exit 2
 fi
+
+dir_log="${TMPDIR:-/tmp}"; dir_log="${dir_log%/}/city-goal"
+mkdir -p "$dir_log/slots" "$dir_log/ids" || exit 2
+
+# Slots e ids (ADR-0035 de city-v2): un directorio por slot o id, creado con un
+# mkdir atómico y con el PID de su dueño adentro. Si ese PID ya no existe, o el
+# directorio quedó sin PID hace más de un minuto, se recupera; la recuperación
+# va con su propio mkdir para que dos bucles no recuperen el mismo.
+sin_dueno() { # sin_dueno <dir>: 0 si nadie vivo lo tiene
+  local p
+  p=$(cat "$1/pid" 2>/dev/null)
+  if [ -n "$p" ]; then ! kill -0 "$p" 2>/dev/null; return; fi
+  [ -n "$(find "$1" -maxdepth 0 -mmin +1 2>/dev/null)" ]
+}
+toma() { # toma <dir>: 0 si quedó con el PID de este bucle
+  if mkdir "$1" 2>/dev/null; then echo "$$" >"$1/pid"; return 0; fi
+  sin_dueno "$1" || return 1
+  mkdir "$1.recupera" 2>/dev/null || return 1
+  if sin_dueno "$1"; then rm -rf "$1"; fi
+  rmdir "$1.recupera"
+  mkdir "$1" 2>/dev/null || return 1
+  echo "$$" >"$1/pid"
+}
+suelta() { # suelta <dir>: lo borra solo si es de este bucle
+  [ -n "$1" ] && [ "$(cat "$1/pid" 2>/dev/null)" = "$$" ] && rm -rf "$1"
+  return 0
+}
+vivo=""; slot=""; id_tomado=""
+# shellcheck disable=SC2329 # la llama el trap de EXIT
+al_salir() { [ -z "$vivo" ] || para_estado; suelta "$id_tomado"; suelta "${slot:+$dir_log/slots/s$slot}"; }
+trap al_salir EXIT
+trap 'exit 129' HUP; trap 'exit 130' INT; trap 'exit 143' TERM
+
+for n in 1 2 3; do
+  if toma "$dir_log/slots/s$n"; then slot=$n; break; fi
+done
+if [ -z "$slot" ]; then
+  echo "goal: no hay slot libre: s1, s2 y s3 son de los bucles $(cat "$dir_log"/slots/s[123]/pid 2>/dev/null | tr '\n' ' ')(en $dir_log/slots). Espera a que termine uno." >&2
+  exit 2
+fi
+# Lo que sale del slot va a cada sesión y a su instalación. CITY_IMAGE no: la
+# imagen del slot la fija el repo. Sin COMPOSE_PROJECT_NAME en el entorno, un
+# docker compose en el worktree toma el del .env de su instalación.
+export CITY_SLOT=$slot CITY_HTTP_PORT="808$slot" CITY_MAILPIT_PORT="$((8025 + slot))" CITY_BASE_DOMAIN="s$slot.city.localhost"
+unset COMPOSE_PROJECT_NAME
 
 # claude con sesión antes del primer worktree: a primera hora la sesión puede
 # haber vencido y cada `claude -p` sale en segundos con "Not logged in". Sin
@@ -78,8 +128,6 @@ if [ -n "$plan" ]; then
   fi
 fi
 
-dir_log="${TMPDIR:-/tmp}"; dir_log="${dir_log%/}/city-goal"
-mkdir -p "$dir_log" || exit 2
 fecha=$(date +%Y-%m-%d-%H%M%S)
 log="$dir_log/$fecha.log"
 # Con stderr en una terminal y sin --quiet, una línea de estado que se reescribe
@@ -109,7 +157,6 @@ herramientas() { # herramientas <worktree> <fase>: lee el stream de stdin y escr
     | while IFS= read -r l; do printf '%s\n' "$l" >>"$log"; printf '%s%s\n' "$borra" "$l" >&2; done
 }
 
-vivo=""
 estado_vivo() { # estado_vivo <fase> [cola] [pr]: con TTY, reescribe la línea de estado cada segundo hasta para_estado
   para_estado
   [ -n "$tty" ] || return 0
@@ -138,7 +185,6 @@ para_estado() { # borra la línea de estado y para a quien la reescribe
   kill "$vivo" 2>/dev/null; wait "$vivo" 2>/dev/null; vivo=""
   printf '\r\033[K' >&2
 }
-trap para_estado EXIT
 
 SIN_PERSONA="Corres desde goal.sh, sin nadie mirando: nadie va a responder preguntas ni aprobar nada. \
 Si la skill te dice que te detengas, o no puedes seguir por cualquier motivo, termina con una línea \
@@ -225,8 +271,8 @@ activa_auto() { # activa_auto <n>: deja resultado vacío (auto-merge activo), re
   fi
 }
 
-espera_pr() { # espera_pr <n>: deja en resultado merged, cerrado, rojo, retenido, sin-auto o tiempo
-  local n=$1 inicio=$SECONDS estado_pr pendientes info
+espera_pr() { # espera_pr <n>: deja en resultado merged, cerrado, rojo, conflicto, retenido, sin-auto o tiempo
+  local n=$1 inicio=$SECONDS estado_pr pendientes info merge salida
   fallidos=""
   anota "PR #$n: esperando checks y merge"
   estado_vivo "PR #$n" "" "$n"
@@ -240,6 +286,26 @@ espera_pr() { # espera_pr <n>: deja en resultado merged, cerrado, rojo, retenido
     fallidos=$(gh pr checks "$n" --json name,bucket \
       --jq '[.[] | select(.bucket == "fail" or .bucket == "cancel") | .name] | join(", ")' 2>>"$log")
     if [ -n "$fallidos" ]; then resultado=rojo; break; fi
+    # main exige ramas al día: tras el merge de otro bucle, este PR queda BEHIND
+    # y su auto-merge espera. update-branch trae main a la rama (el squash lo
+    # aplana) y los checks vuelven a correr.
+    merge=$(gh pr view "$n" --json mergeStateStatus --jq .mergeStateStatus 2>>"$log")
+    if [ "$merge" = DIRTY ]; then resultado=conflicto; break; fi
+    if [ "$merge" = BEHIND ]; then
+      anota "PR #$n: atrás de main; gh pr update-branch"
+      if salida=$(gh pr update-branch "$n" 2>&1); then
+        printf '%s\n' "$salida" >>"$log"
+        sleep "$intervalo"
+        gh pr checks "$n" --watch --fail-fast --interval "$intervalo" >>"$log" 2>&1
+        continue
+      fi
+      printf '%s\n' "$salida" >>"$log"
+      if printf '%s' "$salida" | grep -qi conflict ||
+         [ "$(gh pr view "$n" --json mergeStateStatus --jq .mergeStateStatus 2>>"$log")" = DIRTY ]; then
+        resultado=conflicto; break
+      fi
+      anota "PR #$n: gh pr update-branch falló (ver el log); reintento en la vuelta siguiente"
+    fi
     pendientes=$(gh pr checks "$n" --json bucket --jq '[.[] | select(.bucket == "pending")] | length' 2>>"$log")
     if [ "${pendientes:-1}" = 0 ]; then
       # Todo en verde y sin merge: sin auto-merge (nació bloqueado) o retenido por CODEOWNERS.
@@ -264,12 +330,16 @@ pasos_evaluador() { # pasos_evaluador <worktree> <id>: "3/4 cumplen · pasa" des
     END { printf "%d/%d cumplen · %s\n", ok, n, (v == "" ? "sin veredicto" : v) }' "$f"
 }
 
-baja() { # baja <worktree>: baja la instalación que haya quedado en el worktree
+baja() { # baja <worktree>: baja la instalación que haya quedado en el worktree, solo la de su slot
   anota "bajando la instalación en $(basename "$1")"
   if [ -n "$bajar" ]; then
     (cd "$1" && sh -c "$bajar") >>"$log" 2>&1
-  else
+  elif grep -q '^COMPOSE_PROJECT_NAME=' "$1/.env" 2>/dev/null; then
+    # Compose toma el proyecto del .env del worktree, el de su slot.
     (cd "$1" && docker compose --profile onprem down -v --remove-orphans) >>"$log" 2>&1
+  else
+    # Sin él, Compose bajaría el proyecto por omisión, que puede ser de otro.
+    anota "el .env de $(basename "$1") no nombra COMPOSE_PROJECT_NAME: no bajo nada para no tocar otro proyecto"; return
   fi || anota "no se pudo bajar la instalación (ver el log)"
 }
 
@@ -313,6 +383,7 @@ corre_id() { # corre_id <id>: deja pr, estado, pasos y motivo
     case "$resultado" in
       merged) estado=MERGED; motivo="entró"; break ;;
       cerrado) estado=CLOSED; motivo="el PR se cerró sin merge"; break ;;
+      conflicto) motivo="conflicto con main"; break ;;
       retenido) motivo="retenido por CODEOWNERS"; break ;;
       sin-auto) motivo="checks en verde sin auto-merge: nació bloqueado"; break ;;
       tiempo) motivo="sin merge tras ${espera_max}s"; break ;;
@@ -339,13 +410,20 @@ corre_id() { # corre_id <id>: deja pr, estado, pasos y motivo
   fi
 }
 
-anota "goal: ${ids[*]} · plan ${plan_arg:-ninguno} · máx. $max_sesiones sesiones y $max_bloqueos ids seguidos sin merge · log $log"
+anota "goal: ${ids[*]} · slot s$slot (puerto $CITY_HTTP_PORT, $CITY_BASE_DOMAIN) · plan ${plan_arg:-ninguno} · máx. $max_sesiones sesiones y $max_bloqueos ids seguidos sin merge · log $log"
 filas=""; seguidos=0; todos=0
 for id in "${ids[@]}"; do
   if [ -n "$parada" ]; then
     filas="$filas| $id | — | sin correr | — | no corrió: $parada |"$'\n'; todos=1; continue
   fi
+  # Otro bucle con el mismo id: no lo construye, y no cuenta como bloqueo.
+  if ! toma "$dir_log/ids/$id"; then
+    anota "$id: lo tiene otro bucle ($dir_log/ids/$id)"
+    filas="$filas| $id | — | sin correr | — | lo construye otro bucle |"$'\n'; todos=1; continue
+  fi
+  id_tomado="$dir_log/ids/$id"
   corre_id "$id"
+  suelta "$id_tomado"; id_tomado=""
   anota "$id: $estado · $motivo"
   case "$pr" in [0-9]*) pr="#$pr" ;; esac
   filas="$filas| $id | $pr | $estado | $pasos | $motivo |"$'\n'
@@ -360,6 +438,7 @@ resumen="# goal · $fecha
 | id | PR | estado | pasos del evaluador | por qué paró |
 |---|---|---|---|---|
 $filas
+Slot: s$slot ($CITY_BASE_DOMAIN:$CITY_HTTP_PORT).
 Sesiones de claude: $sesiones de $max_sesiones.
 Parada global: ${parada:-ninguna}.
 Log: $log

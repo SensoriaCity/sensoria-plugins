@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Confirma que la instalación que va a probar el evaluador está en esta máquina.
 
-    python3 entorno-qa.py [url]    (por omisión, qa.url de .city.json)
+    python3 entorno-qa.py [url]    (por omisión, qa.url de .city.json, expandida con qa.py)
 
 Local es solo: localhost, 127.0.0.1, un nombre que termina en .localhost, o
 uno que termina en .test y resuelve únicamente a 127.0.0.1 en esta máquina
@@ -10,12 +10,13 @@ uno que termina en .test y resuelve únicamente a 127.0.0.1 en esta máquina
 con 1. No sabe nada del stack: la base y el correo los cuida el smoke del repo
 (qa.smoke).
 """
-import json
 import socket
-import subprocess
 import sys
 from pathlib import Path
 from urllib.parse import urlsplit
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import qa  # noqa: E402
 
 
 def bloquear(motivo):
@@ -25,11 +26,10 @@ def bloquear(motivo):
 
 url = sys.argv[1] if len(sys.argv) > 1 else ""
 if not url:
-    git = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True)
-    cfg = Path(git.stdout.strip() or ".") / ".city.json"
-    if not cfg.is_file():
-        bloquear("no hay .city.json en la raíz del repo ni URL en el argumento")
-    url = json.loads(cfg.read_text(encoding="utf-8")).get("qa", {}).get("url", "")
+    try:
+        url = qa.url(qa.qa())
+    except ValueError as e:
+        bloquear(f"{e} y no hay URL en el argumento")
 
 try:
     partes = urlsplit(url)
