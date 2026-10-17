@@ -34,8 +34,8 @@ Lee `.city.json` en la raíz del repo (`git rev-parse --show-toplevel`). Si no e
 3. **Título** según `git.commits` de `${CLAUDE_SKILL_DIR}/git.md`; sin la clave, Conventional Commit en español.
 4. `gh pr create --base main --label <label> --title "<título>" --body-file <archivo>`. Si el label no existe, dilo; créalo solo si la persona lo confirma.
 5. **Bitácora.** Si el repo tiene `PROGRESO.md` en la raíz, escribe la entrada con su formato y en la ruta que indica, con el número del PR; commit con el mensaje de bitácora de `git.md` y push a la misma rama. Si no existe, no hay bitácora.
-6. **Merge** según `git.merge`. Con `auto` (o sin la clave), `gh pr merge <n> --auto --squash`, salvo que el PR nazca bloqueado; si el repo no permite auto-merge, dilo. Con `manual`, no lo actives. Nunca mergees a mano.
-7. **CODEOWNERS.** `gh pr view <n> --json files,reviewRequests`. Si un archivo del PR coincide con un patrón de `codeowners_paths`, el PR queda retenido hasta que lo apruebe una persona: di qué archivos y a quién, según `reviewRequests` o el archivo CODEOWNERS del repo (`.github/`, raíz o `docs/`).
+6. **CODEOWNERS.** `gh pr view <n> --json files,reviewRequests`. Si un archivo del PR (o el nombre anterior de uno renombrado) coincide con un patrón de `codeowners_paths`, el PR queda retenido hasta que lo lea una persona: di qué archivos y a quién, según `reviewRequests` o el archivo CODEOWNERS del repo (`.github/`, raíz o `docs/`), y no actives el auto-merge. GitHub no le pide al autor la revisión de sus propias rutas: si el PR sale con el token del único dueño, en auto-merge entraría sin que nadie lo lea.
+7. **Merge** según `git.merge`. Si corres desde `goal.sh` (te lo dice el prompt de sistema), no lo actives: lo decide el bucle. Si no, con `auto` (o sin la clave), sin archivos retenidos en el paso 6 y sin que el PR nazca bloqueado, `gh pr merge <n> --auto --squash --match-head-commit <sha de la cabeza>`; si el repo no permite auto-merge, dilo. Con `manual`, no lo actives. Nunca mergees a mano.
 
 ## Cierre
 
@@ -43,5 +43,5 @@ Responde en 5 líneas:
 1. PR: URL y título.
 2. Tamaño y ADR.
 3. Revisor y evaluador: veredictos; `passes` y su evidencia, si cambió.
-4. Merge: auto-merge activo, manual (espera la aprobación y el merge de una persona), bloqueado (motivo) o retenido por CODEOWNERS (archivos y a quién).
+4. Merge: auto-merge activo, lo decide `goal.sh`, manual (espera la aprobación y el merge de una persona), bloqueado (motivo) o retenido por CODEOWNERS (archivos y a quién).
 5. Bitácora: ruta de la entrada, o "sin bitácora".
