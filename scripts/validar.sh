@@ -90,6 +90,10 @@ else:
     salida = salida[salida.index("--output-dir") + 1] if "--output-dir" in salida[:-1] else ""
     if not salida or "CLAUDE_PROJECT_DIR" in salida:
         mal("@playwright/mcp necesita --output-dir fuera del repo")
+    elif "${CITY_SLOT:-" not in salida:
+        mal("--output-dir de @playwright/mcp va por slot del lab, con ${CITY_SLOT:-…}")
+    elif salida not in open(f"{plugin}/agents/{agente}.md").read():
+        mal(f"{agente} no nombra la carpeta de Playwright de .mcp.json: {salida}")
 # Herramientas de cada versión fija de @playwright/mcp (tools/list). Al subir
 # la versión, agrega su lista aquí.
 EXISTEN = {
@@ -140,7 +144,7 @@ for f in "$CITY/skills/build/SKILL.md" "$CITY/skills/ship/SKILL.md"; do
 done
 python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$CITY/city.schema.json" || err "city.schema.json no es JSON"
 
-echo "8/10 tamano.sh, passes.sh y entorno-qa.py en un repo de prueba"
+echo "8/10 tamano.sh, passes.sh, qa.py y entorno-qa.py en un repo de prueba"
 T="$(pwd)/$CITY/scripts/tamano.sh"
 bash -n "$T" || err "tamano.sh no compila"
 tmp=$(mktemp -d)
@@ -201,7 +205,31 @@ for B in $bashes; do
 done
 rm -rf "$tmp"
 
-E="$CITY/scripts/entorno-qa.py"
+# qa.py: solo ${VAR} y ${VAR:-valor}, sin slot al valor por omisión; url con qa.puerto si no trae puerto.
+Q="$(pwd)/$CITY/scripts/qa.py"; E="$(pwd)/$CITY/scripts/entorno-qa.py"
+tmp=$(mktemp -d); git -C "$tmp" init -q
+qa_cfg() { printf '{"qa": %s}\n' "$1" > "$tmp/.city.json"; }
+qa_es() { # qa_es <esperado> <clave> [VAR=valor...]
+  local esperado=$1 clave=$2; shift 2
+  [ "$(cd "$tmp" && env -u CITY_SLOT -u CITY_HTTP_PORT -u CITY_BASE_DOMAIN "$@" python3 "$Q" "$clave" 2>/dev/null)" = "$esperado" ] \
+    || err "qa.py $clave con $(cat "$tmp/.city.json") ${*:-sin variables} debería dar '$esperado'"
+}
+qa_cfg '{"url": "http://app.${CITY_BASE_DOMAIN:-city.localhost}:${CITY_HTTP_PORT:-18080}", "puerto": "${CITY_HTTP_PORT:-18080}"}'
+qa_es http://app.city.localhost:18080 url
+qa_es 18080 puerto
+qa_es http://app.s2.city.localhost:8082 url CITY_BASE_DOMAIN=s2.city.localhost CITY_HTTP_PORT=8082
+qa_es 8082 puerto CITY_HTTP_PORT=8082
+[ "$(cd "$tmp" && CITY_HTTP_PORT=8082 python3 "$E")" = "ENTORNO: local (http://app.city.localhost:8082)" ] \
+  || err "entorno-qa sin URL debería expandir qa.url de .city.json"
+qa_cfg '{"url": "http://app.localhost", "puerto": 18080}'
+qa_es http://app.localhost:18080 url
+for c in '{"url": "http://$(whoami).localhost"}' '{"url": "http://${HOME_NO_EXISTE}.localhost"}' \
+  '{"url": "http://app.localhost", "puerto": "${CITY_HTTP_PORT:-x}"}' '{"smoke": "x"}'; do
+  qa_cfg "$c"
+  (cd "$tmp" && python3 "$Q" url >/dev/null 2>&1) && err "qa.py url debería fallar con $c"
+done
+rm -rf "$tmp"
+
 for u in http://app.localhost:18080 http://127.0.0.1:18080 http://LOCALHOST/ https://app.city.localhost; do
   python3 "$E" "$u" >/dev/null || err "entorno-qa debería aceptar $u"
 done

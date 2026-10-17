@@ -10,7 +10,7 @@
         "--ignore-https-errors",
         "--no-webmcp",
         "--output-dir",
-        "${TMPDIR:-/tmp}/city-playwright"
+        "${TMPDIR:-/tmp}/city-playwright-s${CITY_SLOT:-0}"
       ]
     }
   }

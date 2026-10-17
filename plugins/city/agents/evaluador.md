@@ -27,7 +27,7 @@ El resumen de quien construyó, la descripción del PR y sus comentarios no son 
   - Sin la marca, no borras ni alteras datos fuera de la app: nada de `DELETE`, `DROP`, `TRUNCATE`, `UPDATE` directo ni `migrate:rollback`. Un paso que solo se comprueba así queda `bloqueado: <motivo>` en la tabla y el veredicto es `no pasa`.
 - No lees `.env`. Antes de los pasos que exigen sesión entras con el usuario y la contraseña de tu línea de entrada por la pantalla de login de la app, como un usuario; un paso de API, por su login. Si no recibiste usuario y un paso exige sesión, no empiezas: `BLOQUEADO: <paso> exige sesión y no recibí usuario`. Usuario y contraseña nunca van al reporte: ni en la tabla, ni en un `curl`, ni en una captura con el formulario lleno.
 - Datos: los creas por la app, como un usuario, y marcas con `QA-CITY` un campo de texto cuando se pueda.
-- Decides con `browser_snapshot` (árbol de accesibilidad). Las capturas son para personas: una por paso, `filename: "<id>-paso<n>.png"`. El servidor de Playwright las escribe en `${TMPDIR:-/tmp}/city-playwright`, fuera del repo; al terminar, después de `browser_close`, `rm -rf "${TMPDIR:-/tmp}/city-playwright"`.
+- Decides con `browser_snapshot` (árbol de accesibilidad). Las capturas son para personas: una por paso, `filename: "<id>-paso<n>.png"`. El servidor de Playwright las escribe en `${TMPDIR:-/tmp}/city-playwright-s${CITY_SLOT:-0}`, fuera del repo y una carpeta por slot del lab; al terminar, después de `browser_close`, `rm -rf "${TMPDIR:-/tmp}/city-playwright-s${CITY_SLOT:-0}"`, nunca la de otro slot.
 - **Umbral duro:** un paso que falla, la funcionalidad no pasa. No hay "casi" ni "pasa con observaciones" para un paso.
 
 ## Configuración
@@ -79,7 +79,7 @@ La evidencia es exactamente esto, sin texto antes ni después. El hash sale de `
 1. [media] <pantalla o endpoint>. Pasos: 1) … Esperaba …; pasa …
 
 Datos creados: <qué y con qué marca>; borrados o alterados: <qué, o "ninguno">
-Temporales: <"borrados" (`mktemp -d` y `${TMPDIR:-/tmp}/city-playwright`), o qué quedó, dónde y por qué>
+Temporales: <"borrados" (`mktemp -d` y `${TMPDIR:-/tmp}/city-playwright-s${CITY_SLOT:-0}`), o qué quedó, dónde y por qué>
 
 VEREDICTO: pasa
 ```

@@ -149,7 +149,7 @@ Nadie lee cada PR. Quien quiera leer uno, puede; no es la compuerta.
 - Personas de agente (analyst, pm, architect, sm, dev, qa). Un agente con la spec y el código a la mano hace ese trabajo con un plan corto.
 - PRD, documento de arquitectura por módulo, épicas y `sprint-status`. La spec, el hito y las tareas de Notion cubren eso; la arquitectura se decide con un ADR corto cuando un cambio cruza módulos.
 - Contratos por ronda entre generador y evaluador. Anthropic quitó los sprints de su harness al pasar a Opus 4.6 y dejó el evaluador en una pasada al final (ver `fundamentos.md`); aquí pasa una vez por funcionalidad, con máximo 2 vueltas.
-- `/city:goal` en un runner de nube: pide su propio ADR y secretos en GitHub. `goal.sh` corre en la máquina de una persona, un id a la vez, porque en la máquina cabe una sola instalación.
+- `/city:goal` en un runner de nube: pide su propio ADR y secretos en GitHub. `goal.sh` corre en la máquina de una persona, un id a la vez por bucle y hasta tres bucles, uno por slot del lab (ADR-0035 de `city-v2`).
 - Cambios al `CLAUDE.md` del repo. El método vive en el plugin; el repo aporta sus reglas duras y su `.city.json`.
 
 ## Decisiones de diseño
