@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Prueba en seco de goal.sh con claude, gh y docker falsos en el PATH, sobre un
 # repo de prueba con su origin. Recorre dos ids: S1 entra (build, ship, checks
-# en verde, merge) y S2 para por "Bloqueo" en la salida de build. Luego, claude
+# en verde, merge) y S2 para por "Bloqueo" en la salida de build. Luego, la
+# guarda del auto-merge (rutas de dueños, renombrados y reintento) y claude
 # sin sesión: antes del primer worktree y en la salida de build. Corre goal.sh
 # con el mismo bash que corre esta prueba. Sale con 0 si todo cumple.
 set -uo pipefail
@@ -17,7 +18,7 @@ git init -q --bare "$tmp/origin.git"
 git init -q "$tmp/repo"
 (
   cd "$tmp/repo" && git checkout -q -b main \
-    && printf '{"ramas": "feat/", "label": "city", "features": "f", "evidencia_dir": "ev"}\n' > .city.json \
+    && printf '{"ramas": "feat/", "label": "city", "features": "f", "evidencia_dir": "ev", "codeowners_paths": ["docs/adr/**", "docker/**"]}\n' > .city.json \
     && mkdir f && printf '{"id": "S1", "passes": false}\n' > f/S1.json \
     && printf '{"id": "S2", "passes": false}\n' > f/S2.json \
     && git add . && git commit -q -m base \
@@ -31,12 +32,16 @@ L="$tmp/llamadas"
 # solo el texto, como claude -p en modo texto.
 printf '#!/bin/sh\nL="%s"\n' "$L" > "$tmp/bin/claude"
 cat >> "$tmp/bin/claude" <<'EOF'
-prompt=""; modo=""; formato=""
+prompt=""; modo=""; formato=""; extra=""
 while [ $# -gt 0 ]; do
-  case "$1" in -p) prompt=$2; shift ;; --permission-mode) modo=$2; shift ;; --output-format) formato=$2; shift ;; esac
+  case "$1" in
+    -p) prompt=$2; shift ;; --permission-mode) modo=$2; shift ;; --output-format) formato=$2; shift ;;
+    --append-system-prompt) extra=$2; shift ;;
+  esac
   shift
 done
 echo "claude $modo $prompt" >> "$L"
+[ "$prompt" != /city:ship ] || echo "ship-extra $extra" >> "$L"
 texto() {
   case "${SIN_SESION:-}:$prompt" in
     todo:*|build:/city:build*) echo "Not logged in · Please run /login"; exit 1 ;;
@@ -48,6 +53,10 @@ texto() {
       git add ev && git commit -q -m "test(s1): evidencia de S1"
       echo "7. Siguiente paso: /city:ship en esta sesión." ;;
     "/city:build S2"*) echo "Bloqueo: falta el usuario de prueba" ;;
+    "/city:build S6"*|"/city:build S7"*|"/city:build S8"*)
+      id=${prompt#/city:build }; id=${id%% *}
+      git switch -q -c "feat/$(date +%Y-%m-%d)-$id" 2>/dev/null || true
+      echo "7. Siguiente paso: /city:ship en esta sesión." ;;
     "/city:ship") echo "1. PR: https://github.com/x/y/pull/7" ;;
   esac
 }
@@ -69,9 +78,22 @@ EOF
 cat > "$tmp/bin/gh" <<EOF
 #!/bin/sh
 echo "gh \$*" >> "$L"
+# PR 7 (S1) entra; 8 (S6) toca docs/adr; 9 (S7) renombra desde docker/; 10 (S8)
+# sigue abierto con un check en rojo.
 case "\$1 \$2" in
-  "pr list") case "\$*" in *-S1*) echo 7 ;; esac ;;
-  "pr view") echo MERGED ;;
+  "pr list") case "\$*" in *-S1*) echo 7 ;; *-S6*) echo 8 ;; *-S7*) echo 9 ;; *-S8*) echo 10 ;; esac ;;
+  "pr view") case "\$*" in
+      *headRefOid*) echo abc1234def ;;
+      *autoMergeRequest*) echo true ;;
+      *" 10 "*) echo OPEN ;;
+      *) echo MERGED ;;
+    esac ;;
+  "pr checks") case "\$*" in *" 10 "*name,bucket*) echo api ;; esac ;;
+  "api --paginate") case "\$*" in
+      */pulls/8/files*) printf 'api/x.php\ndocs/adr/ADR-9.md\n' ;;
+      */pulls/9/files*) printf 'api/nuevo.sh\ndocker/viejo.sh\n' ;;
+      *) echo api/x.php ;;
+    esac ;;
 esac
 exit 0
 EOF
@@ -96,6 +118,11 @@ grep -q '^claude auto /city:build S1$' "$L" || falla "build S1 debería correr c
 grep -q '^claude auto /city:ship$' "$L" || falla "ship debería correr con --permission-mode auto"
 [ "$(grep -c '^claude auto /city:ship' "$L")" -eq 1 ] || falla "S2 no debería llegar a ship"
 grep -q '^gh pr checks 7 --watch' "$L" || falla "debería esperar los checks del PR 7 con --watch"
+grep -qx 'gh pr merge 7 --auto --squash --match-head-commit abc1234def' "$L" \
+  || falla "debería activar el auto-merge del PR 7 atado a su cabeza"
+[ "$(grep -n '^gh pr merge 7 --auto' "$L" | cut -d: -f1)" -gt "$(grep -n '^claude auto /city:ship' "$L" | cut -d: -f1)" ] \
+  || falla "el auto-merge debería activarse después de ship"
+grep -q '^ship-extra .*No actives el auto-merge' "$L" || falla "ship debería recibir que no active el auto-merge"
 [ "$(grep -c '^docker compose --profile onprem down -v --remove-orphans$' "$L")" -eq 2 ] \
   || falla "debería bajar la instalación de cada id"
 [ ! -e "$tmp/repo/.claude/worktrees/goal-S1" ] || falla "el worktree de S1 debería borrarse: su PR entró"
@@ -148,6 +175,32 @@ echo "$salida_m" | grep -qF '| S5 | — | sin PR | — | build salió con 3 |' |
 grep -qF 'S5 · build1 · Bash' "$tmp/stderr-m" || falla "sin result, las herramientas deberían verse igual"
 git -C "$tmp/repo" worktree remove --force "$tmp/repo/.claude/worktrees/goal-S5"
 
+# La guarda: un PR con una ruta de dueños, también renombrada desde ella, no
+# queda en auto-merge ni espera checks; para con "retenido por CODEOWNERS".
+: > "$L"
+salida_r=$(cd "$tmp/repo" && PATH="$tmp/bin:$PATH" TMPDIR="$tmp/r" GOAL_INTERVALO=1 GOAL_ESPERA_MAX=5 \
+  "$BASH" "$G" S6 S7 --quiet 2>/dev/null)
+echo "$salida_r" | grep -qF '| S6 | #8 | OPEN | — | retenido por CODEOWNERS: docs/adr/ADR-9.md |' \
+  || falla "S6 debería quedar retenido por docs/adr/ADR-9.md"
+echo "$salida_r" | grep -qF '| S7 | #9 | OPEN | — | retenido por CODEOWNERS: docker/viejo.sh |' \
+  || falla "S7 debería quedar retenido por el nombre anterior docker/viejo.sh"
+grep -qE '^gh pr merge (8|9) ' "$L" && falla "un PR con rutas de dueños no debería tocar el merge"
+grep -qE '^gh pr checks (8|9) --watch' "$L" && falla "un PR retenido no debería esperar checks"
+git -C "$tmp/repo" worktree remove --force "$tmp/repo/.claude/worktrees/goal-S6"
+git -C "$tmp/repo" worktree remove --force "$tmp/repo/.claude/worktrees/goal-S7"
+
+# Con checks en rojo, quita el auto-merge antes del reintento de build.
+: > "$L"
+salida_ro=$(cd "$tmp/repo" && PATH="$tmp/bin:$PATH" TMPDIR="$tmp/ro" GOAL_INTERVALO=1 GOAL_ESPERA_MAX=5 \
+  "$BASH" "$G" S8 --quiet 2>/dev/null)
+echo "$salida_ro" | grep -qF '| S8 | #10 | OPEN | — | checks en rojo dos veces: api |' \
+  || falla "S8 debería parar con checks en rojo dos veces"
+[ "$(grep -c '^claude auto /city:build S8' "$L")" -eq 2 ] || falla "S8 debería reintentar build una vez"
+quita=$(grep -n '^gh pr merge 10 --disable-auto$' "$L" | head -n1 | cut -d: -f1)
+build2=$(grep -n '^claude auto /city:build S8' "$L" | sed -n 2p | cut -d: -f1)
+[ -n "$quita" ] && [ "$quita" -lt "${build2:-0}" ] || falla "debería quitar el auto-merge del PR 10 antes del reintento"
+git -C "$tmp/repo" worktree remove --force "$tmp/repo/.claude/worktrees/goal-S8"
+
 # Con TTY (script de macOS), la línea de estado se reescribe con \r.
 if [ "$(uname)" = Darwin ]; then
   (cd "$tmp/repo" && PATH="$tmp/bin:$PATH" TMPDIR="$tmp/y" PAUSA=2 \
@@ -192,4 +245,4 @@ if [ "$fallas" -gt 0 ]; then
   echo "--- stdout"; echo "$salida"; echo "--- stderr"; cat "$tmp/stderr"; echo "--- llamadas"; cat "$L"
   exit 1
 fi
-echo "goal.sh en seco: 2 ids, uno entra y otro para por Bloqueo; --quiet; stream sin result; claude sin sesión antes y durante (bash $BASH_VERSION)"
+echo "goal.sh en seco: 2 ids, uno entra y otro para por Bloqueo; guarda del auto-merge; --quiet; stream sin result; claude sin sesión antes y durante (bash $BASH_VERSION)"

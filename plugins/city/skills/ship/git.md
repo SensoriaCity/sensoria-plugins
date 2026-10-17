@@ -23,7 +23,7 @@ Si el `CLAUDE.md` del repo prohíbe nombrar una IA en commits o PR, ningún comm
 
 ## Merge: `git.merge`
 
-- `auto` (por omisión): `/city:ship` activa `gh pr merge <n> --auto --squash` y el PR entra cuando pasan los checks requeridos.
+- `auto` (por omisión): `/city:ship` activa `gh pr merge <n> --auto --squash` si ningún archivo del PR cae en `codeowners_paths`, y el PR entra cuando pasan los checks requeridos. Dentro de `/city:goal` lo activa `goal.sh`, con la misma guarda, no la sesión.
 - `manual`: el PR lo aprueba y lo mergea una persona, con las reglas del repo para el merge (`docs/harness/entorno.md`). `/city:ship` no activa el auto-merge ni mergea, y `/city:goal` no corre.
 
 ## Versión: `git.version`

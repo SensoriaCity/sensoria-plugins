@@ -34,8 +34,8 @@ Desde la raíz del repo. `caffeinate -i` evita que el Mac se duerma; `goal.md` r
 
 1. `git fetch` y worktree nuevo `.claude/worktrees/goal-<id>` desde `origin/main`.
 2. `claude -p "/city:build <id> [plan]" --permission-mode auto --permission-prompts none`, con la instrucción de terminar en `Bloqueo: <motivo>` si se detiene.
-3. Sin bloqueo, `claude -p "/city:ship"`; toma el PR con `gh pr list --head <rama>`, espera `gh pr checks --watch` y luego el merge.
-4. Si un check falla: un reintento de build sobre la misma rama, con los checks en rojo como contexto, y otro ship. Al segundo fallo, ese id para.
+3. Sin bloqueo, `claude -p "/city:ship"`, que no activa el auto-merge; toma el PR con `gh pr list --head <rama>` y lee sus archivos, también el nombre anterior de los renombrados. Si ninguno cae en `codeowners_paths` (de `origin/main`), activa `gh pr merge --auto --squash --match-head-commit <cabeza>`, espera `gh pr checks --watch` y luego el merge; si alguno cae, el id para con "retenido por CODEOWNERS" y el PR espera a una persona.
+4. Si un check falla: quita el auto-merge, un reintento de build sobre la misma rama, con los checks en rojo como contexto, otro ship y otra vez la guarda. Al segundo fallo, ese id para.
 5. Baja la instalación con `qa.bajar` (sin él, Compose con el perfil `onprem`, `down -v`) y borra el worktree solo si el PR entró.
 
 ## Paradas globales

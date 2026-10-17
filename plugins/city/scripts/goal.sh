@@ -4,8 +4,9 @@
 # Uso: goal.sh <id>... [--plan <ruta>] [--max-sesiones N] [--max-bloqueos N] [--quiet]
 # Corre desde la raíz del repo. Por cada id, en orden: worktree nuevo desde
 # origin/main en .claude/worktrees/goal-<id>; ahí `claude -p "/city:build <id>
-# [plan]"` y, sin bloqueo, `claude -p "/city:ship"`; espera los checks y el
-# merge del PR. Si un check falla, un reintento de build y ship sobre la misma
+# [plan]"` y, sin bloqueo, `claude -p "/city:ship"`; si ningún archivo del PR
+# cae en codeowners_paths, activa su auto-merge; espera los checks y el merge.
+# Si un check falla, quita el auto-merge y reintenta build y ship en la misma
 # rama; al segundo fallo, para ese id. Al terminar cada id baja la instalación
 # (qa.bajar de .city.json; sin él, Compose con el perfil onprem) y borra el
 # worktree solo si el PR entró. Paradas globales: --max-sesiones sesiones de
@@ -31,7 +32,7 @@ while [ $# -gt 0 ]; do
     --max-sesiones) [ $# -ge 2 ] || uso; entero "$1" "$2"; max_sesiones=$2; shift 2 ;;
     --max-bloqueos) [ $# -ge 2 ] || uso; entero "$1" "$2"; max_bloqueos=$2; shift 2 ;;
     --quiet) quiet=1; shift ;;
-    -h|--help) sed -n '2,18p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,19p' "$0"; exit 0 ;;
     -*) uso "opción desconocida: $1" ;;
     *) case "$1" in .*|*[!A-Za-z0-9._-]*) uso "id inválido: '$1'" ;; esac; ids+=("$1"); shift ;;
   esac
@@ -144,6 +145,11 @@ Si la skill te dice que te detengas, o no puedes seguir por cualquier motivo, te
 que empiece por 'Bloqueo: ' y el motivo; si el motivo es un ADR, escribe 'necesita ADR' en esa línea. \
 No uses la palabra 'Bloqueo' para nada más."
 
+# Ship no activa el auto-merge: el clasificador del modo auto lo niega ("Merge
+# Without Review") y lo decide activa_auto, que mira los archivos del PR.
+SIN_AUTO=" No actives el auto-merge ni lo intentes: goal.sh lo activa después si ningún archivo del PR \
+cae en codeowners_paths. En la línea 4 del cierre escribe 'Merge: lo decide goal.sh'."
+
 sesiones=0; parada=""; rc=0
 sesion() { # sesion <worktree> <salida> <prompt> [contexto]: corre claude -p y deja su código en rc
   if [ "$sesiones" -ge "$max_sesiones" ]; then
@@ -177,6 +183,46 @@ sesion() { # sesion <worktree> <salida> <prompt> [contexto]: corre claude -p y d
     parada="claude sin sesión"; anota "PARADA: $parada: corre \`claude\` y /login"; return 1
   fi
   return 0
+}
+
+# El auto-merge lo activa goal.sh, nunca la sesión. Un PR que toca una ruta de
+# codeowners_paths no queda en auto-merge: si el autor es el único dueño, GitHub
+# no le pide su revisión y entraría sin que nadie lo lea. Los patrones salen de
+# origin/main, no del PR ni del checkout. Con [[ == ]] un `*` también cruza `/`:
+# casa de más, nunca de menos. Cuenta también el nombre anterior de un renombrado.
+activa_auto() { # activa_auto <n>: deja resultado vacío (auto-merge activo), retenido o sin-auto, y razon
+  local n=$1 sha archivos patrones f p
+  resultado=""; razon=""
+  patrones=$(git show origin/main:.city.json 2>>"$log" | jq -r '.codeowners_paths // [] | .[]' 2>>"$log")
+  if [ -z "$patrones" ]; then
+    for f in .github/CODEOWNERS CODEOWNERS docs/CODEOWNERS; do
+      if git cat-file -e "origin/main:$f" 2>/dev/null; then
+        resultado=sin-auto; razon="hay $f y .city.json no trae codeowners_paths"; return
+      fi
+    done
+  fi
+  sha=$(gh pr view "$n" --json headRefOid --jq .headRefOid 2>>"$log")
+  archivos=$(gh api --paginate "repos/{owner}/{repo}/pulls/$n/files" \
+    --jq '.[] | .filename, (.previous_filename // empty)' 2>>"$log")
+  if [ -z "$sha" ] || [ -z "$archivos" ]; then
+    resultado=sin-auto; razon="no pude leer la cabeza o los archivos del PR #$n"; return
+  fi
+  while IFS= read -r f; do
+    while IFS= read -r p; do
+      [ -n "$p" ] || continue
+      # shellcheck disable=SC2053 # sin comillas, p es patrón
+      if [[ "$f" == $p ]]; then razon="$razon $f"; break; fi
+    done <<<"$patrones"
+  done <<<"$archivos"
+  if [ -n "$razon" ]; then
+    resultado=retenido; razon=${razon# }; anota "PR #$n: toca $razon; queda sin auto-merge"; return
+  fi
+  # Atado al SHA cuyos archivos se leyeron: si llegó otro push, no se activa.
+  if gh pr merge "$n" --auto --squash --match-head-commit "$sha" >>"$log" 2>&1; then
+    anota "PR #$n: auto-merge activo sobre $(printf '%.7s' "$sha")"
+  else
+    resultado=sin-auto; razon="gh pr merge --auto falló (ver el log)"
+  fi
 }
 
 espera_pr() { # espera_pr <n>: deja en resultado merged, cerrado, rojo, retenido, sin-auto o tiempo
@@ -253,11 +299,16 @@ corre_id() { # corre_id <id>: deja pr, estado, pasos y motivo
       *) motivo="build no dejó la rama ${ramas}AAAA-MM-DD-$id"; break ;;
     esac
     [ "$intento" -eq 1 ] || extra=" El PR #$pr de esta rama ya existe: haz push a la rama y no abras otro."
-    sesion "$wt" "$dir_log/$fecha-$id-ship$intento.txt" "/city:ship" "$extra" || { motivo=$parada; break; }
+    sesion "$wt" "$dir_log/$fecha-$id-ship$intento.txt" "/city:ship" "$SIN_AUTO$extra" || { motivo=$parada; break; }
     if [ "$rc" -ne 0 ]; then motivo="ship salió con $rc"; break; fi
     pr=$(gh pr list --head "$rama" --state all --json number --jq '.[0].number // empty' 2>>"$log")
     if [ -z "$pr" ]; then pr="—"; motivo="ship no abrió PR"; break; fi
     estado=OPEN
+    activa_auto "$pr"
+    case "$resultado" in
+      retenido) motivo="retenido por CODEOWNERS: $razon"; break ;;
+      sin-auto) motivo="sin auto-merge: $razon"; break ;;
+    esac
     espera_pr "$pr"
     case "$resultado" in
       merged) estado=MERGED; motivo="entró"; break ;;
@@ -268,6 +319,12 @@ corre_id() { # corre_id <id>: deja pr, estado, pasos y motivo
     esac
     anota "PR #$pr: checks en rojo ($fallidos), intento $intento"
     if [ "$intento" -ge 2 ]; then motivo="checks en rojo dos veces: $fallidos"; break; fi
+    # El reintento empuja a esta rama: con el auto-merge armado, entraría en
+    # cuanto pasen los checks, sin que activa_auto vuelva a leer sus archivos.
+    if ! gh pr merge "$pr" --disable-auto >>"$log" 2>&1 &&
+       [ "$(gh pr view "$pr" --json autoMergeRequest --jq '.autoMergeRequest != null' 2>>"$log")" != false ]; then
+      motivo="no pude quitar el auto-merge del PR #$pr antes del reintento"; break
+    fi
     intento=2
     extra=" El PR #$pr de esta rama tiene checks en rojo: $fallidos. Míralos con gh pr checks $pr y gh run view --log-failed, y corrige en esta misma rama."
   done
