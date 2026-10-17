@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Bucle por objetivo: build → ship → checks → merge, una funcionalidad a la vez
 # y sin nadie mirando. Compatible con el bash 3.2 de macOS.
-# Uso: goal.sh <id>... [--plan <ruta>] [--max-sesiones N] [--max-bloqueos N]
+# Uso: goal.sh <id>... [--plan <ruta>] [--max-sesiones N] [--max-bloqueos N] [--quiet]
 # Corre desde la raíz del repo. Por cada id, en orden: worktree nuevo desde
 # origin/main en .claude/worktrees/goal-<id>; ahí `claude -p "/city:build <id>
 # [plan]"` y, sin bloqueo, `claude -p "/city:ship"`; espera los checks y el
@@ -13,22 +13,25 @@
 # con "necesita ADR" o "Bloqueo", una sesión con "Not logged in" y Docker
 # apagado. Antes del primer worktree prueba que claude tenga sesión.
 # Log en ${TMPDIR:-/tmp}/city-goal/<fecha>.log; el resumen (goal.md) sale por
-# stdout. Sale con 0 si todos los PR entraron, 1 si no y 2 si no pudo empezar.
+# stdout y el avance por stderr: una línea por herramienta de cada sesión y, en
+# una terminal, una línea de estado (--quiet: solo las líneas del log). Sale
+# con 0 si todos los PR entraron, 1 si no y 2 si no pudo empezar.
 set -uo pipefail
 
 intervalo=${GOAL_INTERVALO:-30}     # segundos entre consultas a GitHub
 espera_max=${GOAL_ESPERA_MAX:-7200} # segundos máximos esperando checks y merge de un PR
 
-uso() { echo "goal: ${1:+$1. }uso: goal.sh <id>... [--plan <ruta>] [--max-sesiones N] [--max-bloqueos N]" >&2; exit 2; }
+uso() { echo "goal: ${1:+$1. }uso: goal.sh <id>... [--plan <ruta>] [--max-sesiones N] [--max-bloqueos N] [--quiet]" >&2; exit 2; }
 entero() { case "$2" in ''|*[!0-9]*|0) uso "$1 pide un entero mayor que 0" ;; esac; }
 
-ids=(); plan=""; max_sesiones=12; max_bloqueos=2
+ids=(); plan=""; max_sesiones=12; max_bloqueos=2; quiet=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --plan) [ $# -ge 2 ] || uso "--plan pide una ruta"; plan=$2; shift 2 ;;
     --max-sesiones) [ $# -ge 2 ] || uso; entero "$1" "$2"; max_sesiones=$2; shift 2 ;;
     --max-bloqueos) [ $# -ge 2 ] || uso; entero "$1" "$2"; max_bloqueos=$2; shift 2 ;;
-    -h|--help) sed -n '2,16p' "$0"; exit 0 ;;
+    --quiet) quiet=1; shift ;;
+    -h|--help) sed -n '2,18p' "$0"; exit 0 ;;
     -*) uso "opción desconocida: $1" ;;
     *) case "$1" in .*|*[!A-Za-z0-9._-]*) uso "id inválido: '$1'" ;; esac; ids+=("$1"); shift ;;
   esac
@@ -78,7 +81,63 @@ dir_log="${TMPDIR:-/tmp}"; dir_log="${dir_log%/}/city-goal"
 mkdir -p "$dir_log" || exit 2
 fecha=$(date +%Y-%m-%d-%H%M%S)
 log="$dir_log/$fecha.log"
-anota() { printf '%s %s\n' "$(date +%H:%M:%S)" "$*" | tee -a "$log" >&2; }
+# Con stderr en una terminal y sin --quiet, una línea de estado que se reescribe
+# con \r; cada línea que sale por stderr empieza borrándola.
+tty=""; borra=""
+if [ -z "$quiet" ] && [ -t 2 ]; then tty=1; borra=$'\r\033[K'; fi
+anota() { local l; l="$(date +%H:%M:%S) $*"; printf '%s\n' "$l" >>"$log"; printf '%s%s\n' "$borra" "$l" >&2; }
+
+# Del stream-json de una sesión, una línea por herramienta: el comando de Bash,
+# la ruta de Read o Edit, el subagente de Agent. Nunca contenidos ni salidas.
+# shellcheck disable=SC2016 # las $ son de jq
+FILTRO='def corta: gsub("[\\n\\t]+"; " ") | if length > 80 then .[0:79] + "…" else . end;
+  fromjson? | objects | select(.type == "assistant") | .parent_tool_use_id as $p
+  | .message.content[]? | objects | select(.type == "tool_use") | (.input // {}) as $in
+  | (.name // "?" | sub("^mcp__.*__"; "")) as $h
+  | (if $h == "Bash" then $in.command
+     elif ($h | test("^(Read|Edit|MultiEdit|Write|NotebookEdit)$")) then ($in.file_path // $in.notebook_path)
+     elif $h == "Agent" or $h == "Task" then ($in.subagent_type // "general-purpose")
+     elif $h == "Grep" or $h == "Glob" then $in.pattern
+     elif $h == "Skill" then $in.skill
+     elif $h == "WebFetch" or $h == "browser_navigate" then $in.url
+     else null end) as $r
+  | "\(now | strflocaltime("%H:%M:%S")) \($id) · \($fase) · \(if $p then "↳ " else "" end)\($h)"
+    + (if ($r | type) == "string" and $r != "" then " · " + ($r | ltrimstr($wt) | corta) else "" end)'
+herramientas() { # herramientas <worktree> <fase>: lee el stream de stdin y escribe sus líneas en stderr y el log
+  jq -R -r --unbuffered --arg wt "$1/" --arg id "$id" --arg fase "$2" "$FILTRO" 2>/dev/null \
+    | while IFS= read -r l; do printf '%s\n' "$l" >>"$log"; printf '%s%s\n' "$borra" "$l" >&2; done
+}
+
+vivo=""
+estado_vivo() { # estado_vivo <fase> [cola] [pr]: con TTY, reescribe la línea de estado cada segundo hasta para_estado
+  para_estado
+  [ -n "$tty" ] || return 0
+  local pos=0 x
+  for x in "${ids[@]}"; do pos=$((pos + 1)); [ "$x" = "$id" ] && break; done
+  (
+    inicio=$SECONDS consulta=-1 checks="" t=0 d="" c=""
+    while kill -0 "$$" 2>/dev/null; do
+      t=$((SECONDS - inicio))
+      if [ -n "${3:-}" ] && { [ "$consulta" -lt 0 ] || [ $((t - consulta)) -ge "$intervalo" ]; }; then
+        consulta=$t
+        c=$(gh pr checks "$3" --json bucket \
+          --jq '"\([.[] | select(.bucket == "pass" or .bucket == "skipping")] | length)/\(length)"' 2>/dev/null)
+        [ -n "$c" ] && checks=" · checks $c"
+      fi
+      if [ "$t" -ge 3600 ]; then d=$(printf '%dh%02dm' $((t / 3600)) $((t % 3600 / 60)))
+      else d=$(printf '%dm%02ds' $((t / 60)) $((t % 60))); fi
+      printf '\r\033[K[%d/%d] %s · %s%s · %s%s' "$pos" "${#ids[@]}" "$id" "$1" "$checks" "$d" "${2:+ · $2}" >&2
+      sleep 1
+    done
+  ) &
+  vivo=$!
+}
+para_estado() { # borra la línea de estado y para a quien la reescribe
+  [ -n "$vivo" ] || return 0
+  kill "$vivo" 2>/dev/null; wait "$vivo" 2>/dev/null; vivo=""
+  printf '\r\033[K' >&2
+}
+trap para_estado EXIT
 
 SIN_PERSONA="Corres desde goal.sh, sin nadie mirando: nadie va a responder preguntas ni aprobar nada. \
 Si la skill te dice que te detengas, o no puedes seguir por cualquier motivo, termina con una línea \
@@ -95,8 +154,23 @@ sesion() { # sesion <worktree> <salida> <prompt> [contexto]: corre claude -p y d
   local -a args
   args=(-p "$3" --permission-mode auto --permission-prompts none --append-system-prompt "$SIN_PERSONA${4:-}")
   if [ -n "$dir_extra" ]; then args+=(--add-dir "$dir_extra"); fi
-  (cd "$1" && claude "${args[@]}") >"$2" 2>&1 </dev/null
-  rc=$?
+  if [ -n "$quiet" ]; then
+    (cd "$1" && claude "${args[@]}") >"$2" 2>&1 </dev/null
+    rc=$?
+  else
+    # El stream completo va a <salida>.jsonl; la salida queda como en modo texto:
+    # stderr, lo que no sea JSON y el texto del último result.
+    local fase=${2##*-} stream=${2%.txt}.jsonl
+    fase=${fase%.txt}
+    estado_vivo "$fase" "sesión $sesiones/$max_sesiones"
+    (cd "$1" && claude "${args[@]}" --output-format stream-json --verbose) 2>"$2" </dev/null \
+      | tee "$stream" | { herramientas "$1" "$fase"; cat >/dev/null; }
+    rc=${PIPESTATUS[0]}
+    para_estado
+    jq -R -s -r 'split("\n") | map(select(length > 0) | {l: ., j: ((try fromjson catch null) | if type == "object" then . else null end)})
+      | (.[] | select(.j == null) | .l), ([.[].j | select(.type? == "result")] | last | .result? | strings)' \
+      "$stream" >>"$2" 2>>"$log"
+  fi
   cat "$2" >>"$log"
   anota "claude salió con $rc (salida en $2)"
   if grep -qF 'Not logged in' "$2"; then
@@ -109,29 +183,31 @@ espera_pr() { # espera_pr <n>: deja en resultado merged, cerrado, rojo, retenido
   local n=$1 inicio=$SECONDS estado_pr pendientes info
   fallidos=""
   anota "PR #$n: esperando checks y merge"
+  estado_vivo "PR #$n" "" "$n"
   gh pr checks "$n" --watch --fail-fast --interval "$intervalo" >>"$log" 2>&1
   while :; do
     estado_pr=$(gh pr view "$n" --json state --jq .state 2>>"$log")
     case "$estado_pr" in
-      MERGED) resultado=merged; return ;;
-      CLOSED) resultado=cerrado; return ;;
+      MERGED) resultado=merged; break ;;
+      CLOSED) resultado=cerrado; break ;;
     esac
     fallidos=$(gh pr checks "$n" --json name,bucket \
       --jq '[.[] | select(.bucket == "fail" or .bucket == "cancel") | .name] | join(", ")' 2>>"$log")
-    if [ -n "$fallidos" ]; then resultado=rojo; return; fi
+    if [ -n "$fallidos" ]; then resultado=rojo; break; fi
     pendientes=$(gh pr checks "$n" --json bucket --jq '[.[] | select(.bucket == "pending")] | length' 2>>"$log")
     if [ "${pendientes:-1}" = 0 ]; then
       # Todo en verde y sin merge: sin auto-merge (nació bloqueado) o retenido por CODEOWNERS.
       info=$(gh pr view "$n" --json autoMergeRequest,reviewDecision \
         --jq '"\(.autoMergeRequest != null) \(.reviewDecision)"' 2>>"$log")
       case "$info" in
-        false*) resultado=sin-auto; return ;;
-        *REVIEW_REQUIRED*|*CHANGES_REQUESTED*) resultado=retenido; return ;;
+        false*) resultado=sin-auto; break ;;
+        *REVIEW_REQUIRED*|*CHANGES_REQUESTED*) resultado=retenido; break ;;
       esac
     fi
-    if [ $((SECONDS - inicio)) -ge "$espera_max" ]; then resultado=tiempo; return; fi
+    if [ $((SECONDS - inicio)) -ge "$espera_max" ]; then resultado=tiempo; break; fi
     sleep "$intervalo"
   done
+  para_estado
 }
 
 pasos_evaluador() { # pasos_evaluador <worktree> <id>: "3/4 cumplen · pasa" desde la evidencia, o —
