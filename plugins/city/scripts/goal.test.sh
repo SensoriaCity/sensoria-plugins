@@ -26,26 +26,45 @@ git init -q "$tmp/repo"
 
 mkdir -p "$tmp/bin" "$tmp/t"
 L="$tmp/llamadas"
-cat > "$tmp/bin/claude" <<EOF
-#!/bin/sh
-prompt=""; modo=""
-while [ \$# -gt 0 ]; do
-  case "\$1" in -p) prompt=\$2; shift ;; --permission-mode) modo=\$2; shift ;; esac
+# claude falso: con --output-format stream-json emite un stream pequeño (texto,
+# herramientas, un subagente, una salida con un secreto y el result); sin él,
+# solo el texto, como claude -p en modo texto.
+printf '#!/bin/sh\nL="%s"\n' "$L" > "$tmp/bin/claude"
+cat >> "$tmp/bin/claude" <<'EOF'
+prompt=""; modo=""; formato=""
+while [ $# -gt 0 ]; do
+  case "$1" in -p) prompt=$2; shift ;; --permission-mode) modo=$2; shift ;; --output-format) formato=$2; shift ;; esac
   shift
 done
-echo "claude \$modo \$prompt" >> "$L"
-case "\${SIN_SESION:-}:\$prompt" in
-  todo:*|build:/city:build*) echo "Not logged in · Please run /login"; exit 1 ;;
-esac
-case "\$prompt" in
-  "/city:build S1"*)
-    git switch -q -c "feat/\$(date +%Y-%m-%d)-S1" && mkdir -p ev
-    printf '# Evidencia · S1 · hoy · abc\n\n| Paso | Qué hizo | Resultado |\n|---|---|---|\n| 1 | a | cumple |\n| 2 | b | cumple |\n\nVEREDICTO: pasa\n' > ev/S1.md
-    git add ev && git commit -q -m "test(s1): evidencia de S1"
-    echo "7. Siguiente paso: /city:ship en esta sesión." ;;
-  "/city:build S2"*) echo "Bloqueo: falta el usuario de prueba" ;;
-  "/city:ship") echo "1. PR: https://github.com/x/y/pull/7" ;;
-esac
+echo "claude $modo $prompt" >> "$L"
+texto() {
+  case "${SIN_SESION:-}:$prompt" in
+    todo:*|build:/city:build*) echo "Not logged in · Please run /login"; exit 1 ;;
+  esac
+  case "$prompt" in
+    "/city:build S1"*)
+      git switch -q -c "feat/$(date +%Y-%m-%d)-S1" && mkdir -p ev
+      printf '# Evidencia · S1 · hoy · abc\n\n| Paso | Qué hizo | Resultado |\n|---|---|---|\n| 1 | a | cumple |\n| 2 | b | cumple |\n\nVEREDICTO: pasa\n' > ev/S1.md
+      git add ev && git commit -q -m "test(s1): evidencia de S1"
+      echo "7. Siguiente paso: /city:ship en esta sesión." ;;
+    "/city:build S2"*) echo "Bloqueo: falta el usuario de prueba" ;;
+    "/city:ship") echo "1. PR: https://github.com/x/y/pull/7" ;;
+  esac
+}
+[ "$formato" = stream-json ] || { texto; exit; }
+echo '{"type":"system","subtype":"init"}'
+jq -nc --arg f "$PWD/ev/S1.md" '{type: "assistant", parent_tool_use_id: null, message: {content: [
+  {type: "text", text: "PENSANDO-EN-VOZ-ALTA"},
+  {type: "tool_use", id: "t1", name: "Bash", input: {command: "git switch -c feat/S1\necho hecho"}},
+  {type: "tool_use", id: "t2", name: "Agent", input: {subagent_type: "city:evaluador", prompt: "PROMPT-DEL-SUBAGENTE"}}]}},
+  {type: "assistant", parent_tool_use_id: "t2", message: {content: [{type: "tool_use", id: "t3", name: "Read", input: {file_path: $f}}]}},
+  {type: "user", parent_tool_use_id: null, message: {content: [{type: "tool_result", tool_use_id: "t1", content: "SECRETO=abc"}]}}'
+echo 'línea suelta que no es JSON'
+sleep "${PAUSA:-0}"
+if [ "$prompt" = "/city:build S5" ]; then echo "claude murió a medias" >&2; exit 3; fi
+t=$(texto); r=$?
+jq -nc --arg t "$t" '{type: "result", subtype: "success", is_error: false, result: $t}'
+exit "$r"
 EOF
 cat > "$tmp/bin/gh" <<EOF
 #!/bin/sh
@@ -86,6 +105,58 @@ git -C "$tmp/repo" worktree list | grep -q 'goal-S1' && falla "git todavía list
 ls "$tmp"/t/city-goal/*.log >/dev/null 2>&1 || falla "el log debería quedar en \$TMPDIR/city-goal"
 [ -z "$(git -C "$tmp/repo" status --porcelain -- . ':!.claude')" ] || falla "goal.sh no debería dejar archivos en el repo"
 
+# El avance: una línea por herramienta en stderr y en el log, sin contenidos ni
+# salidas; sin TTY, sin \r. El stream completo queda en el .jsonl y el .txt
+# tiene lo mismo que daría claude -p en modo texto.
+d="$tmp/t/city-goal"
+grep -qF 'S1 · build1 · Bash · git switch -c feat/S1 echo hecho' "$tmp/stderr" || falla "debería mostrar el comando de Bash de build1"
+grep -qF 'S1 · build1 · Agent · city:evaluador' "$tmp/stderr" || falla "debería mostrar el subagente de Agent"
+grep -qF 'S1 · build1 · ↳ Read · ev/S1.md' "$tmp/stderr" || falla "debería mostrar el Read del subagente con su ruta relativa"
+grep -qF 'S2 · build1 · Bash' "$tmp/stderr" || falla "debería mostrar las herramientas de build de S2"
+grep -qF 'S1 · ship1 · Bash' "$tmp/stderr" || falla "debería mostrar las herramientas de ship"
+grep -qF 'S1 · build1 · Agent' "$d"/*.log || falla "las líneas de herramientas deberían quedar en el log"
+grep -qE 'SECRETO|PROMPT-DEL|PENSANDO' "$tmp/stderr" && falla "stderr no debería traer salidas, prompts ni texto de las sesiones"
+grep -q "$(printf '\r')" "$tmp/stderr" && falla "sin TTY no debería haber \\r en stderr"
+[ "$(cat "$d"/*-S1-build1.txt)" = "$(printf 'línea suelta que no es JSON\n7. Siguiente paso: /city:ship en esta sesión.')" ] \
+  || falla "el .txt de build1 de S1 debería tener lo que no es JSON y el texto del result"
+[ "$(tail -n1 "$d"/*-S2-build1.txt)" = "Bloqueo: falta el usuario de prueba" ] || falla "el .txt de build de S2 debería terminar en su Bloqueo"
+grep -q '"type":"result"' "$d"/*-S1-build1.jsonl || falla "el stream completo debería quedar en el .jsonl"
+
+# --quiet: lo de antes, sin stream ni herramientas, y el mismo resumen y .txt.
+git -C "$tmp/repo" worktree remove --force "$tmp/repo/.claude/worktrees/goal-S2"
+mkdir -p "$tmp/q"
+salida_q=$(cd "$tmp/repo" && PATH="$tmp/bin:$PATH" TMPDIR="$tmp/q" GOAL_INTERVALO=1 GOAL_ESPERA_MAX=5 \
+  "$BASH" "$G" S1 S2 --quiet 2>"$tmp/stderr-q")
+rc=$?
+[ "$rc" -eq 1 ] || falla "con --quiet debería salir con 1 como sin él (salió con $rc)"
+normaliza() { sed -e '1s/ · .*//' -e '/^Log: /d'; }
+[ "$(echo "$salida" | normaliza)" = "$(echo "$salida_q" | normaliza)" ] || falla "con --quiet el resumen debería ser el mismo"
+grep -q ' · build1 · ' "$tmp/stderr-q" && falla "con --quiet no debería mostrar herramientas"
+ls "$tmp"/q/city-goal/*.jsonl >/dev/null 2>&1 && falla "con --quiet no debería escribir .jsonl"
+for f in S1-build1 S1-ship1 S2-build1; do
+  [ "$(cat "$tmp"/q/city-goal/*-$f.txt)" = "$(grep -v '^línea suelta' "$d"/*-$f.txt)" ] \
+    || falla "con --quiet el .txt de $f debería ser el texto de su result"
+done
+git -C "$tmp/repo" worktree remove --force "$tmp/repo/.claude/worktrees/goal-S2"
+
+# Un stream sin result (claude murió): el .txt lleva lo que haya y el id para.
+: > "$L"
+salida_m=$(cd "$tmp/repo" && PATH="$tmp/bin:$PATH" TMPDIR="$tmp/m" "$BASH" "$G" S5 2>"$tmp/stderr-m")
+echo "$salida_m" | grep -qF '| S5 | — | sin PR | — | build salió con 3 |' || falla "S5 debería parar con build salió con 3"
+[ "$(cat "$tmp"/m/city-goal/*-S5-build1.txt)" = "$(printf 'claude murió a medias\nlínea suelta que no es JSON')" ] \
+  || falla "sin result, el .txt de S5 debería traer stderr y lo que no es JSON"
+grep -qF 'S5 · build1 · Bash' "$tmp/stderr-m" || falla "sin result, las herramientas deberían verse igual"
+git -C "$tmp/repo" worktree remove --force "$tmp/repo/.claude/worktrees/goal-S5"
+
+# Con TTY (script de macOS), la línea de estado se reescribe con \r.
+if [ "$(uname)" = Darwin ]; then
+  (cd "$tmp/repo" && PATH="$tmp/bin:$PATH" TMPDIR="$tmp/y" PAUSA=2 \
+    script -q "$tmp/tty" "$BASH" "$G" S2 >/dev/null 2>&1 </dev/null)
+  grep -qF "$(printf '\r\033[K[1/1] S2 · build1 · 0m0')" "$tmp/tty" || falla "con TTY debería mostrar la línea de estado de build1"
+  grep -qF ' · sesión 1/12' "$tmp/tty" || falla "la línea de estado debería decir la sesión"
+  git -C "$tmp/repo" worktree remove --force "$tmp/repo/.claude/worktrees/goal-S2"
+fi
+
 # Sin sesión de claude, goal.sh no arranca: ni worktrees ni ids.
 : > "$L"
 salida_ss=$(cd "$tmp/repo" && PATH="$tmp/bin:$PATH" TMPDIR="$tmp/t" SIN_SESION=todo "$BASH" "$G" S3 S4 2>"$tmp/stderr-ss")
@@ -121,4 +192,4 @@ if [ "$fallas" -gt 0 ]; then
   echo "--- stdout"; echo "$salida"; echo "--- stderr"; cat "$tmp/stderr"; echo "--- llamadas"; cat "$L"
   exit 1
 fi
-echo "goal.sh en seco: 2 ids, uno entra y otro para por Bloqueo; claude sin sesión antes y durante (bash $BASH_VERSION)"
+echo "goal.sh en seco: 2 ids, uno entra y otro para por Bloqueo; --quiet; stream sin result; claude sin sesión antes y durante (bash $BASH_VERSION)"
