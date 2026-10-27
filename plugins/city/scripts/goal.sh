@@ -17,7 +17,7 @@
 # worktree solo si el PR entró. Paradas globales: --max-sesiones sesiones de
 # claude (12), --max-bloqueos ids seguidos sin merge (2), una salida de build
 # con "necesita ADR" o "Bloqueo", una sesión con "Not logged in" y Docker
-# apagado. Antes del primer worktree prueba que claude tenga sesión.
+# apagado (solo sin qa.bajar). Antes del primer worktree prueba que claude tenga sesión.
 # Log en ${TMPDIR:-/tmp}/city-goal/<fecha>.log; el resumen (goal.md) sale por
 # stdout y el avance por stderr: una línea por herramienta de cada sesión y, en
 # una terminal, una línea de estado (--quiet: solo las líneas del log). Sale
@@ -44,7 +44,7 @@ while [ $# -gt 0 ]; do
 done
 [ "${#ids[@]}" -gt 0 ] || uso "falta al menos un id"
 
-for c in git gh jq claude docker; do
+for c in git gh jq claude; do
   command -v "$c" >/dev/null 2>&1 || { echo "goal: necesito $c" >&2; exit 2; }
 done
 raiz=$(git rev-parse --show-toplevel 2>/dev/null) || { echo "goal: no es un repo git" >&2; exit 2; }
@@ -54,6 +54,11 @@ ramas=$(jq -r '.ramas // empty' .city.json) || { echo "goal: .city.json no es JS
 evidencia_dir=$(jq -r '.evidencia_dir // empty' .city.json)
 bajar=$(jq -r '.qa.bajar // empty' .city.json)
 [ -n "$ramas" ] || { echo "goal: .city.json no tiene ramas" >&2; exit 2; }
+# Docker solo hace falta para la bajada por omisión: con qa.bajar, el repo
+# monta y baja su instalación sin él.
+if [ -z "$bajar" ]; then
+  command -v docker >/dev/null 2>&1 || { echo "goal: necesito docker (o qa.bajar en .city.json)" >&2; exit 2; }
+fi
 if [ "$(jq -r '.git.merge // "auto"' .city.json)" = manual ]; then
   echo "goal: el merge de este repo es manual (git.merge en .city.json) y el bucle necesita auto-merge" >&2
   exit 2
@@ -346,7 +351,7 @@ baja() { # baja <worktree>: baja la instalación que haya quedado en el worktree
 corre_id() { # corre_id <id>: deja pr, estado, pasos y motivo
   local id=$1 wt intento=1 extra="" rama="" salida linea
   pr="—"; estado="sin PR"; pasos="—"; motivo=""
-  if ! docker info >/dev/null 2>&1; then
+  if [ -z "$bajar" ] && ! docker info >/dev/null 2>&1; then
     parada="Docker apagado"; motivo=$parada; anota "PARADA: $parada"; return
   fi
   git fetch -q origin >>"$log" 2>&1 || { motivo="git fetch falló"; return; }
