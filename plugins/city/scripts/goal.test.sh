@@ -5,7 +5,8 @@
 # guarda del auto-merge (rutas de dueños, renombrados y reintento) y claude
 # sin sesión: antes del primer worktree y en la salida de build. Después, los
 # slots del lab (toma, recuperación de un PID muerto, sin slot libre, suelta
-# al salir), el reclamo de ids y un PR atrás de main, con y sin conflicto.
+# al salir), el reclamo de ids, un PR atrás de main, con y sin conflicto, y
+# Docker apagado con y sin qa.bajar.
 # Corre goal.sh con el mismo bash que corre esta prueba. Sale con 0 si todo cumple.
 set -uo pipefail
 
@@ -321,6 +322,24 @@ echo "$salida_sb" | grep -qF '| S4 | — | sin correr | — | no corrió: claude
 [ "$(grep -c '^claude auto ' "$L")" -eq 1 ] || falla "tras Not logged in no debería abrir más sesiones"
 [ ! -e "$tmp/repo/.claude/worktrees/goal-S3" ] || falla "el worktree vacío de S3 debería borrarse"
 
+# Con Docker apagado, para sin abrir sesiones; con qa.bajar no lo necesita.
+: > "$L"
+mkdir -p "$tmp/bin-off"
+printf '#!/bin/sh\necho "docker $*" >> "%s"\nexit 1\n' "$L" > "$tmp/bin-off/docker"
+chmod +x "$tmp/bin-off/docker"
+salida_do=$(cd "$tmp/repo" && PATH="$tmp/bin-off:$tmp/bin:$PATH" TMPDIR="$tmp/do" "$BASH" "$G" S2 --quiet 2>/dev/null)
+echo "$salida_do" | grep -qF 'Docker apagado' || falla "sin qa.bajar y con Docker apagado debería parar"
+grep -q '^claude auto ' "$L" && falla "con Docker apagado no debería abrir sesiones"
+: > "$L"
+jq --arg b "touch '$tmp/bajado'" '. + {qa: {bajar: $b}}' "$tmp/repo/.city.json" > "$tmp/bajar.json" \
+  && cp "$tmp/bajar.json" "$tmp/repo/.city.json"
+(cd "$tmp/repo" && PATH="$tmp/bin-off:$tmp/bin:$PATH" TMPDIR="$tmp/do" "$BASH" "$G" S2 --quiet >/dev/null 2>&1)
+grep -q '^claude auto /city:build S2$' "$L" || falla "con qa.bajar debería correr aunque Docker esté apagado"
+grep -q '^docker ' "$L" && falla "con qa.bajar no debería llamar a docker"
+[ -e "$tmp/bajado" ] || falla "con qa.bajar debería bajar la instalación con su comando"
+git -C "$tmp/repo" worktree remove --force "$tmp/repo/.claude/worktrees/goal-S2"
+git -C "$tmp/repo" checkout -q .city.json
+
 # Con git.merge manual, goal.sh no arranca ni abre sesiones.
 : > "$L"
 jq '. + {git: {merge: "manual"}}' "$tmp/repo/.city.json" > "$tmp/manual.json" && cp "$tmp/manual.json" "$tmp/repo/.city.json"
@@ -334,4 +353,4 @@ if [ "$fallas" -gt 0 ]; then
   echo "--- stdout"; echo "$salida"; echo "--- stderr"; cat "$tmp/stderr"; echo "--- llamadas"; cat "$L"
   exit 1
 fi
-echo "goal.sh en seco: 2 ids, uno entra y otro para por Bloqueo; guarda del auto-merge; --quiet; stream sin result; slots, ids y ramas atrás de main; claude sin sesión antes y durante (bash $BASH_VERSION)"
+echo "goal.sh en seco: 2 ids, uno entra y otro para por Bloqueo; guarda del auto-merge; --quiet; stream sin result; slots, ids y ramas atrás de main; claude sin sesión antes y durante; Docker solo sin qa.bajar (bash $BASH_VERSION)"

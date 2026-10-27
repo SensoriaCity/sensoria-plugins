@@ -16,7 +16,7 @@ No corres el bucle en esta sesión: dura horas y abre sus propias sesiones de `c
 1. `.city.json` en la raíz del repo (`git rev-parse --show-toplevel`); si no existe, detente y dilo. De ahí salen `ramas`, `features`, `evidencia_dir`, `qa.bajar` y `git.merge`. Su contrato: `${CLAUDE_PLUGIN_ROOT}/city.schema.json`.
 2. Cada id existe en `origin/main` con `passes: false` y sin `reemplazada_por` (el bucle construye desde ahí): `git show origin/main:<features>/<id>.json | jq '{passes, reemplazada_por}'`. Los cortes de una spec son secuenciales: van en orden, c1 antes que c2.
 3. Ningún PR abierto trae ya ese id (`gh pr list --state open`), ni queda `.claude/worktrees/goal-<id>` de una corrida anterior.
-4. `docker info` responde y queda un slot libre: caben tres bucles, uno por slot (`ls "${TMPDIR:-/tmp}/city-goal/slots"`; el de un PID muerto se recupera). Dos bucles no comparten ids: los cortes de una spec van todos en el mismo bucle, en orden.
+4. Sin `qa.bajar`, `docker info` responde (con `qa.bajar`, el bucle no usa Docker). Queda un slot libre: caben tres bucles, uno por slot (`ls "${TMPDIR:-/tmp}/city-goal/slots"`; el de un PID muerto se recupera). Dos bucles no comparten ids: los cortes de una spec van todos en el mismo bucle, en orden.
 5. Si pasan `--plan`, el archivo existe.
 6. `git.merge` no es `manual`: el bucle espera el auto-merge de cada PR (`${CLAUDE_PLUGIN_ROOT}/skills/ship/git.md`). `goal.sh` también lo comprueba.
 
@@ -44,7 +44,7 @@ Antes del primer id toma un slot `sN` libre (de 1 a 3; sin slot libre no arranca
 - `--max-sesiones N` (12): cada build y cada ship es una sesión.
 - `--max-bloqueos N` (2): ids seguidos sin merge, por la razón que sea.
 - Una salida de build con `necesita ADR` o `Bloqueo`, también la de su compuerta de corte, que detiene el bucle antes de escribir código.
-- Docker apagado.
+- Docker apagado, solo si `.city.json` no trae `qa.bajar`.
 - `claude` sin sesión. Antes del primer worktree, `goal.sh` prueba `claude -p "Responde solo: ok" --max-turns 1 --tools ""`; si dice `Not logged in` o falla, sale con 2 y pide correr `claude` y `/login`. Si una sesión del bucle dice `Not logged in`, para todo con `claude sin sesión` y borra el worktree que quedó vacío.
 
 Un id también para sin parar el bucle si lo construye otro bucle, build no deja su rama, ship no abre PR, el PR queda retenido por CODEOWNERS, nace bloqueado (verde sin auto-merge), tiene conflicto con main o pasan 2 h sin merge.
