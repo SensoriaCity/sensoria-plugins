@@ -2,59 +2,78 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/SensoriaCity/sensoria-plugins/plugins/city/city.schema.json",
   "title": ".city.json",
-  "description": "Contrato entre el plugin city y cada repo. El kit no sabe nada del stack: todo lo que ejecuta o lee sale de aquí. Va en la raíz del repo.",
+  "description": "Contrato entre el plugin city y cada repo. El kit no sabe nada del stack: todo lo que ejecuta o lee sale de aquí. Va en la raíz del repo. Desde city 3.0 las claves van en inglés; las de city 2.x en español (tope_lineas, evidencia_dir, ramas, revisor_extra, seguridad_checklist, tests.navegador, tests.estatico, qa.instalar, qa.bajar, qa.puerto, qa.usuario, qa.usuario_stdin, notion.hitos, notion.tareas) siguen valiendo, marcadas como obsoletas: el kit lee la nueva y, si falta, la vieja.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["app", "tests", "tope_lineas", "qa", "features", "evidencia_dir", "adr_dir", "ramas", "label", "codeowners_paths"],
+  "required": ["app", "tests", "qa", "features", "adr_dir", "label", "codeowners_paths"],
+  "allOf": [
+    { "anyOf": [{ "required": ["line_limit"] }, { "required": ["tope_lineas"] }] },
+    { "anyOf": [{ "required": ["evidence_dir"] }, { "required": ["evidencia_dir"] }] },
+    { "anyOf": [{ "required": ["branches"] }, { "required": ["ramas"] }] }
+  ],
   "properties": {
     "app": {
       "type": "string",
-      "description": "Nombre corto del repo; va en las ramas y en los reportes. Ejemplo: city, city-v2.",
+      "description": "Nombre corto del repo; va en las ramas y en los reportes. Ejemplo: city, city-v2. No es el aplicativo: la carpeta <aplicativo> de <apps_dir>/<aplicativo>/<modulo>/<hito>/ es la del aplicativo dueño del módulo.",
       "pattern": "^[a-z0-9][a-z0-9-]*$"
     },
     "tests": {
       "type": "object",
-      "description": "Comandos que corren build, revisor y evaluador, desde la raíz del repo. Cada uno es una lista: un comando por paquete o superficie. La lista vacía significa que el repo no tiene ese tipo de prueba.",
+      "description": "Comandos que corren build, el revisor y el evaluador, desde la raíz del repo. Cada uno es una lista: un comando por paquete o superficie. La lista vacía significa que el repo no tiene ese tipo de prueba.",
       "additionalProperties": false,
-      "required": ["unit", "navegador", "lint", "estatico", "audit"],
+      "required": ["unit", "lint", "audit"],
+      "allOf": [
+        { "anyOf": [{ "required": ["browser"] }, { "required": ["navegador"] }] },
+        { "anyOf": [{ "required": ["static"] }, { "required": ["estatico"] }] }
+      ],
       "properties": {
         "unit": { "$ref": "#/$defs/comandos", "description": "Pruebas unitarias e integración (Pest, Vitest, bash)." },
-        "navegador": { "$ref": "#/$defs/comandos", "description": "Pruebas de punta a punta en navegador (Playwright). Vacío si el evaluador es la única prueba de navegador." },
+        "browser": { "$ref": "#/$defs/comandos", "description": "Pruebas de punta a punta en navegador (Playwright). Vacío si el evaluador es la única prueba de navegador." },
         "lint": { "$ref": "#/$defs/comandos", "description": "Formato y lint (Pint, ESLint, ShellCheck)." },
-        "estatico": { "$ref": "#/$defs/comandos", "description": "Análisis estático y tipos (Semgrep, tsc, PHPStan)." },
+        "static": { "$ref": "#/$defs/comandos", "description": "Análisis estático y tipos (Semgrep, tsc, PHPStan)." },
         "audit": { "$ref": "#/$defs/comandos", "description": "Auditoría de dependencias (composer audit, pnpm audit)." },
-        "postgres": { "type": "string", "minLength": 1, "description": "Opcional. Receta para las pruebas que exigen una base desechable: un comando que levanta la base fuera de la instalación, migra, corre esas pruebas y borra la base. Recibe al final los argumentos del runner para acotar a una prueba (p. ej. --filter). El evaluador la usa para las cláusulas \"con su prueba en <grupo o suite>\" que la necesitan." }
+        "postgres": { "type": "string", "minLength": 1, "description": "Opcional. Receta para las pruebas que exigen una base desechable: un comando que levanta la base fuera de la instalación, migra, corre esas pruebas y borra la base. Recibe al final los argumentos del runner para acotar a una prueba (p. ej. --filter). El evaluador la usa para las cláusulas \"con su prueba en <grupo o suite>\" que la necesitan." },
+        "database": { "type": "string", "minLength": 1, "description": "Opcional. Comando que corre las pruebas de migración de un corte de clase data contra el motor real (el de producción) en una base desechable que él mismo levanta y borra; nunca contra la base de desarrollo. Recibe al final los argumentos del runner para acotar a una prueba. build lo corre desde \"prueba primero\", y el revisor y el evaluador lo corren literal. Sin la clave, el corte lo dice en su reporte y en el PR, y la evidencia manual del evaluador sobre la base de la instalación de QA es la que cuenta (skills/build/data-slices.md)." },
+        "mutation": { "type": "string", "minLength": 1, "description": "Opcional. Comando del repo que rompe a propósito un comportamiento y corre su prueba para verla fallar, sin dejar cambios en el árbol de trabajo ni tocar las carpetas de dependencias. Recibe al final los argumentos que acote el propio comando (la prueba o el archivo). Romper a propósito una prueba de regresión lo hace quien construye, en su rama, y lo declara en el PR; el evaluador solo lo repite si existe esta clave (o un comando en docs/harness/entorno.md) y, si no, lo declara como no hecho. Nadie lo improvisa con copias del repo." },
+        "navegador": { "$ref": "#/$defs/comandos", "deprecated": true, "description": "Obsoleta (city 2.x): usa browser." },
+        "estatico": { "$ref": "#/$defs/comandos", "deprecated": true, "description": "Obsoleta (city 2.x): usa static." }
       }
     },
-    "tope_lineas": {
+    "line_limit": {
       "type": "integer",
       "minimum": 1,
-      "description": "Tamaño máximo del diff de un corte, en líneas. scripts/tamano.sh lo lee; build, ship y revisor lo aplican."
+      "description": "Tamaño máximo del diff de un corte, en líneas. scripts/size.sh lo lee; build, ship y el revisor lo aplican."
     },
     "qa": {
       "type": "object",
-      "description": "Instalación local limpia donde el evaluador prueba como usuario. url, instalar y puerto pueden nombrar variables del entorno como ${VAR} o ${VAR:-valor}. En el lab, goal.sh toma un slot N de 1 a 3 y exporta a sus sesiones CITY_SLOT=N, CITY_HTTP_PORT=808N, CITY_MAILPIT_PORT=802(5+N) y CITY_BASE_DOMAIN=sN.city.localhost; sin slot (una sesión a mano) no existen y vale lo que va después de :-. instalar lo expande la shell; url y puerto, scripts/qa.py, que no ejecuta nada más.",
+      "description": "Instalación local limpia donde el evaluador prueba como usuario. url, install y port pueden nombrar variables del entorno como ${VAR} o ${VAR:-valor}. En el lab, goal.sh toma un slot N de 1 a 3 y exporta a sus sesiones CITY_SLOT=N, CITY_HTTP_PORT=808N, CITY_MAILPIT_PORT=802(5+N) y CITY_BASE_DOMAIN=sN.city.localhost; sin slot (una sesión a mano) no existen y vale lo que va después de :-. install lo expande la shell; url y port, scripts/qa.py, que no ejecuta nada más.",
       "additionalProperties": false,
-      "required": ["url", "instalar", "smoke"],
-      "dependentRequired": { "usuario": ["usuario_stdin"], "usuario_stdin": ["usuario"] },
+      "required": ["url", "smoke"],
+      "anyOf": [{ "required": ["install"] }, { "required": ["instalar"] }],
+      "dependentRequired": { "user": ["user_stdin"], "user_stdin": ["user"], "usuario": ["usuario_stdin"], "usuario_stdin": ["usuario"] },
       "properties": {
-        "url": { "type": "string", "minLength": 1, "description": "URL base de la app en la instalación local, con el puerto de la instalación: localhost, 127.0.0.1, *.localhost o *.test que resuelve solo a 127.0.0.1. Con slots, nombra sus variables, p. ej. http://app.${CITY_BASE_DOMAIN:-city.localhost}:${CITY_HTTP_PORT:-8080}. build la expande con scripts/qa.py url y el evaluador la confirma con scripts/entorno-qa.py antes de tocar nada." },
-        "instalar": { "type": "string", "minLength": 1, "description": "Comando que levanta la instalación desde cero, con sus variables de entorno. Con slots, el puerto va como CITY_HTTP_PORT=${CITY_HTTP_PORT:-8080}: un valor fijo contradice al slot." },
+        "url": { "type": "string", "minLength": 1, "description": "URL base de la app en la instalación local, con el puerto de la instalación: localhost, 127.0.0.1, *.localhost o *.test que resuelve solo a 127.0.0.1. Con slots, nombra sus variables, p. ej. http://app.${CITY_BASE_DOMAIN:-city.localhost}:${CITY_HTTP_PORT:-8080}. build la expande con scripts/qa.py url y el evaluador la confirma con scripts/qa-env.py antes de tocar nada." },
+        "install": { "type": "string", "minLength": 1, "description": "Comando que levanta la instalación desde cero, con sus variables de entorno. Con slots, el puerto va como CITY_HTTP_PORT=${CITY_HTTP_PORT:-8080}: un valor fijo contradice al slot." },
         "smoke": { "type": "string", "minLength": 1, "description": "Comando que verifica la instalación antes de que el evaluador empiece." },
-        "bajar": { "type": "string", "minLength": 1, "description": "Opcional. Comando que baja la instalación y sus volúmenes desde la raíz del worktree, solo la de su slot (recibe CITY_SLOT). goal.sh lo corre al terminar cada id; sin él, docker compose --profile onprem down -v --remove-orphans, y solo si el .env del worktree trae COMPOSE_PROJECT_NAME: sin él, Compose bajaría el proyecto por omisión, que puede ser de otro slot o de la sesión a mano." },
-        "puerto": {
-          "description": "Puerto HTTP de la instalación, cuando difiere del de producción (Herd ocupa 80 y 443): un número, o con slots la variable con su valor sin slot, como \"${CITY_HTTP_PORT:-8080}\". scripts/qa.py lo agrega a url si esta no trae puerto.",
-          "oneOf": [
-            { "type": "integer", "minimum": 1, "maximum": 65535 },
-            { "type": "string", "pattern": "^\\$\\{[A-Za-z_][A-Za-z0-9_]*:-[0-9]{1,5}\\}$" }
-          ]
+        "teardown": { "type": "string", "minLength": 1, "description": "Opcional. Comando que baja la instalación y sus volúmenes desde la raíz del worktree, solo la de su slot (recibe CITY_SLOT). goal.sh lo corre al terminar cada id; sin él, docker compose --profile onprem down -v --remove-orphans, y solo si el .env del worktree trae COMPOSE_PROJECT_NAME: sin él, Compose bajaría el proyecto por omisión, que puede ser de otro slot o de la sesión a mano." },
+        "port": { "$ref": "#/$defs/puerto", "description": "Puerto HTTP de la instalación, cuando difiere del de producción (Herd ocupa 80 y 443): un número, o con slots la variable con su valor sin slot, como \"${CITY_HTTP_PORT:-8080}\". scripts/qa.py lo agrega a url si esta no trae puerto." },
+        "user": { "type": "string", "minLength": 1, "description": "Opcional. Comando que crea el usuario de prueba en la instalación leyendo sus datos de la entrada estándar, una línea por elemento de user_stdin. build lo corre después de instalar y le pasa al evaluador correo y contraseña." },
+        "user_stdin": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "enum": ["email", "name", "password", "correo", "nombre", "contraseña"] },
+          "description": "Opcional; va con user. Qué línea espera el comando, en orden: email (qa+<fecha>@city.localhost), name (QA) o password (aleatoria, de 20 caracteres). Repite un elemento si el comando pide confirmarlo. correo, nombre y contraseña son los valores de city 2.x, obsoletos: valen lo mismo."
         },
-        "usuario": { "type": "string", "minLength": 1, "description": "Opcional. Comando que crea el usuario de prueba en la instalación leyendo sus datos de la entrada estándar, una línea por elemento de usuario_stdin. build lo corre después de instalar y le pasa al evaluador correo y contraseña." },
+        "instalar": { "type": "string", "minLength": 1, "deprecated": true, "description": "Obsoleta (city 2.x): usa install." },
+        "bajar": { "type": "string", "minLength": 1, "deprecated": true, "description": "Obsoleta (city 2.x): usa teardown." },
+        "puerto": { "$ref": "#/$defs/puerto", "deprecated": true, "description": "Obsoleta (city 2.x): usa port." },
+        "usuario": { "type": "string", "minLength": 1, "deprecated": true, "description": "Obsoleta (city 2.x): usa user." },
         "usuario_stdin": {
           "type": "array",
           "minItems": 1,
-          "items": { "enum": ["correo", "nombre", "contraseña"] },
-          "description": "Opcional; va con usuario. Qué línea espera el comando, en orden: correo (qa+<fecha>@city.localhost), nombre (QA) o contraseña (aleatoria, de 20 caracteres). Repite un elemento si el comando pide confirmarlo."
+          "items": { "enum": ["email", "name", "password", "correo", "nombre", "contraseña"] },
+          "deprecated": true,
+          "description": "Obsoleta (city 2.x): usa user_stdin."
         }
       }
     },
@@ -62,24 +81,29 @@
       "type": "string",
       "minLength": 1,
       "not": { "pattern": "\\.json$" },
-      "description": "Carpeta de funcionalidades: un archivo <id>.json por funcionalidad, con sus pasos verificables y passes, para que dos ramas no toquen el mismo archivo. passes solo cambia con scripts/passes.sh, que exige la evidencia del evaluador con VEREDICTO: pasa."
+      "description": "Carpeta de funcionalidades de city 2.x: un archivo <id>.json por funcionalidad, con sus pasos verificables y passes, para que dos ramas no toquen el mismo archivo. Los cortes de city 3.0 viven en slices/ de su hito (ver apps_dir). passes solo cambia con scripts/passes.sh, que exige la evidencia del evaluador con VEREDICTO: pasa."
+    },
+    "apps_dir": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Opcional. Raíz de la documentación por aplicativo: <apps_dir>/<aplicativo>/<modulo>/<hito>/ con spec.md, slices/<id>.json y evidence/<id>.md. <aplicativo> es la carpeta del aplicativo dueño del módulo (no la clave app, que es el nombre del repo); <modulo> es mod-<NN>-<slug> y <hito>, h<NN>-<slug>, con dos dígitos; el id de un corte es m<NN>-h<NN>-s<NN>. Sin la clave, docs/apps. /city:spec escribe ahí; scripts/slice.sh busca un id primero ahí y después en features."
     },
     "specs_dir": {
       "type": "string",
       "minLength": 1,
-      "description": "Opcional. Carpeta donde /city:spec escribe las specs de una página; sin él, docs/specs. Cada funcionalidad que sale de una spec lleva su ruta en la clave spec."
+      "description": "Opcional. Carpeta donde /city:spec escribía las specs de una página en city 2.x; sin él, docs/specs. Cada funcionalidad que sale de una spec lleva su ruta en la clave spec."
     },
-    "evidencia_dir": {
+    "evidence_dir": {
       "type": "string",
       "minLength": 1,
-      "description": "Carpeta donde el evaluador deja capturas y reportes por funcionalidad."
+      "description": "Carpeta donde queda la evidencia del evaluador de las funcionalidades de features (city 2.x). La de un corte de city 3.0 va en evidence/ de su hito."
     },
     "adr_dir": {
       "type": "string",
       "minLength": 1,
       "description": "Carpeta de los ADR. necesita-adr.php y /city:adr escriben aquí."
     },
-    "ramas": {
+    "branches": {
       "type": "string",
       "pattern": "^[a-z0-9-]+/$",
       "description": "Prefijo de las ramas que abre build, con barra final. El token de gh solo puede hacer push a este prefijo y a los Conventional que acepta ship (docs/ para las specs de /city:spec)."
@@ -87,7 +111,7 @@
     "label": {
       "type": "string",
       "minLength": 1,
-      "description": "Label que ship pone en cada PR; firma del flujo para aidd-metrics."
+      "description": "Etiqueta que ship pone en cada PR; firma del flujo para aidd-metrics. Ship agrega además la de la clase del PR (class:slice, class:data, class:platform o class:spec) y crea las que falten en el repo."
     },
     "git": {
       "type": "object",
@@ -95,8 +119,8 @@
       "additionalProperties": false,
       "properties": {
         "commits": { "enum": ["conventional", "gitmoji"], "description": "Formato de los commits y del título del PR. conventional (por omisión): <tipo>(<ámbito>): <qué cambia>. gitmoji: <emoji> <frase que dice qué cambia>." },
-        "merge": { "enum": ["auto", "manual"], "description": "auto (por omisión): ship activa el auto-merge por squash. manual: el PR lo aprueba y lo mergea una persona; ship no activa el auto-merge y goal no corre." },
-        "version": { "enum": ["tag", "asunto"], "description": "Dónde queda la versión de cada merge, para check. tag (por omisión): un tag sobre el commit del merge. asunto: el asunto del commit del squash." }
+        "merge": { "enum": ["auto", "manual"], "description": "auto (por omisión): ship activa el auto-merge por squash. manual: el PR lo aprueba y lo mergea una persona; ship no activa el auto-merge y goal.sh abre cada PR y espera a que una persona lo mergee antes de seguir con el corte siguiente." },
+        "version": { "enum": ["tag", "subject", "asunto"], "description": "Dónde queda la versión de cada merge, para check. tag (por omisión): un tag sobre el commit del merge. subject: el asunto del commit del squash. asunto es el valor de city 2.x, obsoleto: vale lo mismo que subject." }
       }
     },
     "codeowners_paths": {
@@ -104,23 +128,59 @@
       "minItems": 1,
       "uniqueItems": true,
       "items": { "type": "string", "minLength": 1 },
-      "description": "Patrones de CODEOWNERS que retienen el PR para lectura humana. ship avisa cuando el diff toca uno; /city:goal para si hay más de tres PR retenidos."
+      "description": "Rutas compartidas del repo: contratos, ADR, plataforma. Un diff que toca una pide ADR (build, ship y el revisor lo comprueban con scripts/owners.sh --match shared) y además retiene el PR para lectura humana. No es una copia del archivo de dueños: ese (codeowners_file) dice quién debe aprobar cada ruta, puede repartir todo el repo por equipo o por panel, y solo retiene el merge, sin pedir ADR (owners.sh --match owned). Para retener, ship, check y la guarda de goal.sh usan la unión de los dos (owners.sh --match)."
     },
-    "revisor_extra": {
+    "codeowners_file": {
       "type": "string",
       "minLength": 1,
-      "description": "Opcional. Archivo del repo con los chequeos propios del stack que el agente revisor aplica después de los generales, con la severidad que el archivo les dé."
+      "description": "Opcional. Ruta del archivo de dueños del repo: quién debe aprobar cada ruta. Sin la clave, el primero que exista de .github/CODEOWNERS, CODEOWNERS y docs/CODEOWNERS. Una ruta que coincide aquí retiene el merge hasta que esa persona o equipo apruebe; no pide ADR (eso es de codeowners_paths). scripts/owners.sh une sus patrones con codeowners_paths para retener, dice cuál de los dos coincide (--match shared u owned) y, con --check, avisa si divergen; /city:check lo reporta."
     },
-    "seguridad_checklist": {
+    "reviewer_extra": {
       "type": "string",
       "minLength": 1,
-      "description": "Opcional. Checklist de seguridad del repo. El agente seguridad lo recorre sobre los archivos del diff y el revisor lo usa en su paso de seguridad; sin él, ambos usan sus categorías."
-    }
+      "description": "Opcional. Archivo del repo con los chequeos propios del stack que el agente reviewer aplica después de los generales, con la severidad que el archivo les dé."
+    },
+    "security_checklist": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Opcional. Checklist de seguridad del repo. El agente security lo recorre sobre los archivos del diff y el reviewer lo usa en su paso de seguridad; sin él, ambos usan sus categorías."
+    },
+    "flags": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Opcional. Documento del repo con la receta de sus flags: dónde se declaran, cómo se esconde algo detrás de uno, cómo se prueba encendido y apagado, quién es su dueño (una persona o un equipo), quién lo enciende y cómo y cuándo se retira. También qué señal distingue producción de los demás ambientes, si un flag se puede bloquear por entorno: los ambientes de revisión pueden correr con la misma configuración que producción, y sin una señal que los separe ese bloqueo no existe. Si fija la fecha o el plazo de retiro, manda sobre el valor por omisión del kit (la fecha del PR de clase spec más 60 días). /city:spec y /city:build lo leen cuando un corte usa el escalón 4; sin la clave, el escalón 4 no está disponible en el repo."
+    },
+    "notion": {
+      "type": "object",
+      "description": "Opcional. Bases de Notion donde viven los hitos y las tareas. Notion guarda qué se construye y en qué va; el repo, cómo. El reparto y qué escribe cada skill están en notion.md del plugin. Sin la clave, ninguna skill escribe en Notion.",
+      "additionalProperties": false,
+      "allOf": [
+        { "anyOf": [{ "required": ["milestones"] }, { "required": ["hitos"] }] },
+        { "anyOf": [{ "required": ["tasks"] }, { "required": ["tareas"] }] }
+      ],
+      "properties": {
+        "milestones": { "type": "string", "minLength": 1, "description": "URL de la base de hitos: una página por hito, con su definición funcional." },
+        "tasks": { "type": "string", "minLength": 1, "description": "URL de la base de tareas: una tarea por corte, ligada a su hito, con el id del corte y la URL del PR." },
+        "hitos": { "type": "string", "minLength": 1, "deprecated": true, "description": "Obsoleta (city 2.x): usa milestones." },
+        "tareas": { "type": "string", "minLength": 1, "deprecated": true, "description": "Obsoleta (city 2.x): usa tasks." }
+      }
+    },
+    "tope_lineas": { "type": "integer", "minimum": 1, "deprecated": true, "description": "Obsoleta (city 2.x): usa line_limit." },
+    "evidencia_dir": { "type": "string", "minLength": 1, "deprecated": true, "description": "Obsoleta (city 2.x): usa evidence_dir." },
+    "ramas": { "type": "string", "pattern": "^[a-z0-9-]+/$", "deprecated": true, "description": "Obsoleta (city 2.x): usa branches." },
+    "revisor_extra": { "type": "string", "minLength": 1, "deprecated": true, "description": "Obsoleta (city 2.x): usa reviewer_extra." },
+    "seguridad_checklist": { "type": "string", "minLength": 1, "deprecated": true, "description": "Obsoleta (city 2.x): usa security_checklist." }
   },
   "$defs": {
     "comandos": {
       "type": "array",
       "items": { "type": "string", "minLength": 1 }
+    },
+    "puerto": {
+      "oneOf": [
+        { "type": "integer", "minimum": 1, "maximum": 65535 },
+        { "type": "string", "pattern": "^\\$\\{[A-Za-z_][A-Za-z0-9_]*:-[0-9]{1,5}\\}$" }
+      ]
     }
   }
 }

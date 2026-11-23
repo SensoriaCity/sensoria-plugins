@@ -6,6 +6,8 @@
 # sin sesión: antes del primer worktree y en la salida de build. Después, los
 # slots del lab (toma, recuperación de un PID muerto, sin slot libre, suelta
 # al salir), el reclamo de ids y un PR atrás de main, con y sin conflicto.
+# También un PR que espera la decisión de una persona (no se reintenta) y la
+# guarda con una ruta que solo está en el archivo de dueños del repo.
 # Corre goal.sh con el mismo bash que corre esta prueba. Sale con 0 si todo cumple.
 set -uo pipefail
 
@@ -20,7 +22,7 @@ git init -q --bare "$tmp/origin.git"
 git init -q "$tmp/repo"
 (
   cd "$tmp/repo" && git checkout -q -b main \
-    && printf '{"ramas": "feat/", "label": "city", "features": "f", "evidencia_dir": "ev", "codeowners_paths": ["docs/adr/**", "docker/**"]}\n' > .city.json \
+    && printf '{"branches": "feat/", "label": "city", "features": "f", "evidence_dir": "ev", "codeowners_paths": ["docs/adr/**", "docker/**"]}\n' > .city.json \
     && mkdir f && printf '{"id": "S1", "passes": false}\n' > f/S1.json \
     && printf '{"id": "S2", "passes": false}\n' > f/S2.json \
     && git add . && git commit -q -m base \
@@ -57,11 +59,12 @@ texto() {
       printf 'APP_KEY=x\nCOMPOSE_PROJECT_NAME=city-s%s\n' "$CITY_SLOT" > .env
       echo "7. Siguiente paso: /city:ship en esta sesión." ;;
     "/city:build S2"*) echo "Bloqueo: falta el usuario de prueba" ;;
-    "/city:build S6"*|"/city:build S7"*|"/city:build S8"*|"/city:build B1"*|"/city:build B2"*)
+    "/city:build S6"*|"/city:build S7"*|"/city:build S8"*|"/city:build B1"*|"/city:build B2"*|"/city:build M1"*|"/city:build D1"*|"/city:build D2"*|"/city:build O1"*)
       id=${prompt#/city:build }; id=${id%% *}
       git switch -q -c "feat/$(date +%Y-%m-%d)-$id" 2>/dev/null || true
       echo "7. Siguiente paso: /city:ship en esta sesión." ;;
-    "/city:ship") echo "1. PR: https://github.com/x/y/pull/7" ;;
+    "/city:ship") echo "1. PR: https://github.com/x/y/pull/7"
+      case "$(git symbolic-ref --short -q HEAD)" in *-D2) echo "4. Merge: espera decisión de Luis Mora (TL) · qué contrato manda" ;; esac ;;
   esac
 }
 [ "$formato" = stream-json ] || { texto; exit; }
@@ -69,7 +72,7 @@ echo '{"type":"system","subtype":"init"}'
 jq -nc --arg f "$PWD/ev/S1.md" '{type: "assistant", parent_tool_use_id: null, message: {content: [
   {type: "text", text: "PENSANDO-EN-VOZ-ALTA"},
   {type: "tool_use", id: "t1", name: "Bash", input: {command: "git switch -c feat/S1\necho hecho"}},
-  {type: "tool_use", id: "t2", name: "Agent", input: {subagent_type: "city:evaluador", prompt: "PROMPT-DEL-SUBAGENTE"}}]}},
+  {type: "tool_use", id: "t2", name: "Agent", input: {subagent_type: "city:evaluator", prompt: "PROMPT-DEL-SUBAGENTE"}}]}},
   {type: "assistant", parent_tool_use_id: "t2", message: {content: [{type: "tool_use", id: "t3", name: "Read", input: {file_path: $f}}]}},
   {type: "user", parent_tool_use_id: null, message: {content: [{type: "tool_result", tool_use_id: "t1", content: "SECRETO=abc"}]}}'
 echo 'línea suelta que no es JSON'
@@ -87,25 +90,31 @@ echo "gh \$*" >> "$L"
 # update-branch; 12 (B2) queda atrás con conflicto.
 case "\$1 \$2" in
   "pr list") case "\$*" in *-S1*) echo 7 ;; *-S6*) echo 8 ;; *-S7*) echo 9 ;; *-S8*) echo 10 ;;
-      *-B1*) echo 11 ;; *-B2*) echo 12 ;; esac ;;
+      *-B1*) echo 11 ;; *-B2*) echo 12 ;; *-M1*) echo 13 ;; *-D1*) echo 14 ;; *-D2*) echo 15 ;; *-O1*) echo 16 ;; esac ;;
   "pr update-branch") case "\$*" in
       *" 11"*) touch "$tmp/actualizado-11" ;;
       *) echo "merge conflict between base and head" >&2; exit 1 ;;
     esac ;;
   "pr view") case "\$*" in
+      *" 14 "*body*) printf 'Texto de arriba\n**Pendiente:** decisión de Ana Ruiz (PO) · si el listado filtra por sede\n\n## Qué hace\n' ;;
+      *body*) printf '## Qué hace\nNada pendiente.\n' ;;
       *" 11 "*mergeStateStatus*) if [ -e "$tmp/actualizado-11" ]; then echo BLOCKED; else echo BEHIND; fi ;;
       *" 11 "*state*) if [ -e "$tmp/actualizado-11" ]; then echo MERGED; else echo OPEN; fi ;;
       *" 12 "*mergeStateStatus*) echo BEHIND ;;
       *" 12 "*state*) echo OPEN ;;
+      *" 13 "*mergeStateStatus*) echo BLOCKED ;;
+      *" 13 "*state*) echo x >> "$tmp/vistas-13"; if [ "\$(wc -l < "$tmp/vistas-13")" -ge 3 ]; then echo MERGED; else echo OPEN; fi ;;
+      *" 13 "*autoMergeRequest*) echo false ;;
       *headRefOid*) echo abc1234def ;;
       *autoMergeRequest*) echo true ;;
       *" 10 "*) echo OPEN ;;
       *) echo MERGED ;;
     esac ;;
-  "pr checks") case "\$*" in *" 10 "*name,bucket*) echo api ;; esac ;;
+  "pr checks") case "\$*" in *" 10 "*name,bucket*) echo api ;; *" 13 "*length*) echo 0 ;; esac ;;
   "api --paginate") case "\$*" in
       */pulls/8/files*) printf 'api/x.php\ndocs/adr/ADR-9.md\n' ;;
       */pulls/9/files*) printf 'api/nuevo.sh\ndocker/viejo.sh\n' ;;
+      */pulls/16/files*) printf 'api/x.txt\napp/Panel/Y.txt\n' ;;
       *) echo api/x.php ;;
     esac ;;
 esac
@@ -117,7 +126,7 @@ echo "docker \$*" >> "$L"
 EOF
 chmod +x "$tmp/bin/claude" "$tmp/bin/gh" "$tmp/bin/docker"
 
-salida=$(cd "$tmp/repo" && PATH="$tmp/bin:$PATH" TMPDIR="$tmp/t" GOAL_INTERVALO=1 GOAL_ESPERA_MAX=5 \
+salida=$(cd "$tmp/repo" && PATH="$tmp/bin:$PATH" TMPDIR="$tmp/t" GOAL_INTERVAL=1 GOAL_MAX_WAIT=5 \
   COMPOSE_PROJECT_NAME=city "$BASH" "$G" S1 S2 2>"$tmp/stderr")
 rc=$?
 
@@ -158,7 +167,7 @@ ls "$tmp"/t/city-goal/*.log >/dev/null 2>&1 || falla "el log debería quedar en 
 # tiene lo mismo que daría claude -p en modo texto.
 d="$tmp/t/city-goal"
 grep -qF 'S1 · build1 · Bash · git switch -c feat/S1 echo hecho' "$tmp/stderr" || falla "debería mostrar el comando de Bash de build1"
-grep -qF 'S1 · build1 · Agent · city:evaluador' "$tmp/stderr" || falla "debería mostrar el subagente de Agent"
+grep -qF 'S1 · build1 · Agent · city:evaluator' "$tmp/stderr" || falla "debería mostrar el subagente de Agent"
 grep -qF 'S1 · build1 · ↳ Read · ev/S1.md' "$tmp/stderr" || falla "debería mostrar el Read del subagente con su ruta relativa"
 grep -qF 'S2 · build1 · Bash' "$tmp/stderr" || falla "debería mostrar las herramientas de build de S2"
 grep -qF 'S1 · ship1 · Bash' "$tmp/stderr" || falla "debería mostrar las herramientas de ship"
@@ -173,7 +182,7 @@ grep -q '"type":"result"' "$d"/*-S1-build1.jsonl || falla "el stream completo de
 # --quiet: lo de antes, sin stream ni herramientas, y el mismo resumen y .txt.
 git -C "$tmp/repo" worktree remove --force "$tmp/repo/.claude/worktrees/goal-S2"
 mkdir -p "$tmp/q"
-salida_q=$(cd "$tmp/repo" && PATH="$tmp/bin:$PATH" TMPDIR="$tmp/q" GOAL_INTERVALO=1 GOAL_ESPERA_MAX=5 \
+salida_q=$(cd "$tmp/repo" && PATH="$tmp/bin:$PATH" TMPDIR="$tmp/q" GOAL_INTERVAL=1 GOAL_MAX_WAIT=5 \
   "$BASH" "$G" S1 S2 --quiet 2>"$tmp/stderr-q")
 rc=$?
 [ "$rc" -eq 1 ] || falla "con --quiet debería salir con 1 como sin él (salió con $rc)"
@@ -199,7 +208,7 @@ git -C "$tmp/repo" worktree remove --force "$tmp/repo/.claude/worktrees/goal-S5"
 # La guarda: un PR con una ruta de dueños, también renombrada desde ella, no
 # queda en auto-merge ni espera checks; para con "retenido por CODEOWNERS".
 : > "$L"
-salida_r=$(cd "$tmp/repo" && PATH="$tmp/bin:$PATH" TMPDIR="$tmp/r" GOAL_INTERVALO=1 GOAL_ESPERA_MAX=5 \
+salida_r=$(cd "$tmp/repo" && PATH="$tmp/bin:$PATH" TMPDIR="$tmp/r" GOAL_INTERVAL=1 GOAL_MAX_WAIT=5 \
   "$BASH" "$G" S6 S7 --quiet 2>/dev/null)
 echo "$salida_r" | grep -qF '| S6 | #8 | OPEN | — | retenido por CODEOWNERS: docs/adr/ADR-9.md |' \
   || falla "S6 debería quedar retenido por docs/adr/ADR-9.md"
@@ -212,7 +221,7 @@ git -C "$tmp/repo" worktree remove --force "$tmp/repo/.claude/worktrees/goal-S7"
 
 # Con checks en rojo, quita el auto-merge antes del reintento de build.
 : > "$L"
-salida_ro=$(cd "$tmp/repo" && PATH="$tmp/bin:$PATH" TMPDIR="$tmp/ro" GOAL_INTERVALO=1 GOAL_ESPERA_MAX=5 \
+salida_ro=$(cd "$tmp/repo" && PATH="$tmp/bin:$PATH" TMPDIR="$tmp/ro" GOAL_INTERVAL=1 GOAL_MAX_WAIT=5 \
   "$BASH" "$G" S8 --quiet 2>/dev/null)
 echo "$salida_ro" | grep -qF '| S8 | #10 | OPEN | — | checks en rojo dos veces: api |' \
   || falla "S8 debería parar con checks en rojo dos veces"
@@ -221,6 +230,49 @@ quita=$(grep -n '^gh pr merge 10 --disable-auto$' "$L" | head -n1 | cut -d: -f1)
 build2=$(grep -n '^claude auto /city:build S8' "$L" | sed -n 2p | cut -d: -f1)
 [ -n "$quita" ] && [ "$quita" -lt "${build2:-0}" ] || falla "debería quitar el auto-merge del PR 10 antes del reintento"
 git -C "$tmp/repo" worktree remove --force "$tmp/repo/.claude/worktrees/goal-S8"
+
+# Espera decisión: el PR nace con "**Pendiente:** decisión de <persona>" (el
+# revisor terminó en "espera decisión"). No es un rojo: ni auto-merge, ni
+# espera de checks, ni reintento de build; el bucle se detiene y dice quién decide.
+: > "$L"
+salida_d=$(cd "$tmp/repo" && PATH="$tmp/bin:$PATH" TMPDIR="$tmp/d" GOAL_INTERVAL=1 GOAL_MAX_WAIT=5 \
+  "$BASH" "$G" D1 D2 --quiet 2>/dev/null)
+rc=$?
+[ "$rc" -eq 1 ] || falla "con un PR que espera una decisión debería salir con 1 (salió con $rc)"
+echo "$salida_d" | grep -qF '| D1 | #14 | OPEN | — | espera decisión de Ana Ruiz (PO) · si el listado filtra por sede |' \
+  || falla "D1 debería parar esperando la decisión de Ana Ruiz (PO)"
+echo "$salida_d" | grep -qF 'Parada global: D1 espera decisión de Ana Ruiz (PO) · si el listado filtra por sede (PR #14).' \
+  || falla "un PR que espera una decisión debería ser parada global, con quién decide"
+echo "$salida_d" | grep -qF '| D2 | — | sin correr | — | no corrió: D1 espera decisión de Ana Ruiz (PO)' \
+  || falla "tras un PR que espera una decisión, D2 no debería correr"
+[ "$(grep -c '^claude auto /city:build D1' "$L")" -eq 1 ] || falla "un PR que espera una decisión no debería reintentar build"
+[ "$(grep -c '^claude auto ' "$L")" -eq 2 ] || falla "un PR que espera una decisión debería gastar solo build y ship de D1"
+grep -qE '^gh pr merge 14 ' "$L" && falla "un PR que espera una decisión no debería tocar el merge"
+grep -qE '^gh pr checks 14 ' "$L" && falla "un PR que espera una decisión no debería esperar checks"
+[ -d "$tmp/repo/.claude/worktrees/goal-D1" ] || falla "D1, que espera una decisión, debería dejar su worktree"
+git -C "$tmp/repo" worktree remove --force "$tmp/repo/.claude/worktrees/goal-D1"
+# Sin esa línea en el cuerpo, vale la línea 4 del cierre de ship.
+: > "$L"
+salida_d2=$(cd "$tmp/repo" && PATH="$tmp/bin:$PATH" TMPDIR="$tmp/d2" GOAL_INTERVAL=1 GOAL_MAX_WAIT=5 \
+  "$BASH" "$G" D2 --quiet 2>/dev/null)
+echo "$salida_d2" | grep -qF '| D2 | #15 | OPEN | — | espera decisión de Luis Mora (TL) · qué contrato manda |' \
+  || falla "D2 debería parar esperando la decisión que dice el cierre de ship"
+grep -qE '^gh pr (merge|checks) 15 ' "$L" && falla "D2, que espera una decisión, no debería tocar el merge ni esperar checks"
+git -C "$tmp/repo" worktree remove --force "$tmp/repo/.claude/worktrees/goal-D2"
+
+# La guarda usa owners.sh: una ruta que solo está en el archivo de dueños del
+# repo (y no en codeowners_paths) también retiene el PR.
+: > "$L"
+(
+  cd "$tmp/repo" && mkdir -p .github && printf '/app/Panel/ @equipo-panel\n' > .github/CODEOWNERS \
+    && git add .github && git commit -q -m "archivo de dueños" && git push -q origin main
+) || falla "no pude guardar el archivo de dueños en el repo de prueba"
+salida_o=$(cd "$tmp/repo" && PATH="$tmp/bin:$PATH" TMPDIR="$tmp/o" GOAL_INTERVAL=1 GOAL_MAX_WAIT=5 \
+  "$BASH" "$G" O1 --quiet 2>/dev/null)
+echo "$salida_o" | grep -qF '| O1 | #16 | OPEN | — | retenido por CODEOWNERS: app/Panel/Y.txt |' \
+  || falla "O1 debería quedar retenido por app/Panel/Y.txt, que solo está en el archivo de dueños"
+grep -qE '^gh pr merge 16 ' "$L" && falla "un PR con una ruta del archivo de dueños no debería tocar el merge"
+git -C "$tmp/repo" worktree remove --force "$tmp/repo/.claude/worktrees/goal-O1"
 
 # Con TTY (script de macOS), la línea de estado se reescribe con \r.
 if [ "$(uname)" = Darwin ]; then
@@ -288,7 +340,7 @@ git -C "$tmp/repo" worktree remove --force "$tmp/repo/.claude/worktrees/goal-S2"
 # Atrás de main: B1 pide update-branch, vuelve a esperar los checks y entra; B2
 # tiene conflicto, para con "conflicto con main" y deja su worktree.
 : > "$L"
-salida_b=$(cd "$tmp/repo" && PATH="$tmp/bin:$PATH" TMPDIR="$tmp/b" GOAL_INTERVALO=1 GOAL_ESPERA_MAX=5 \
+salida_b=$(cd "$tmp/repo" && PATH="$tmp/bin:$PATH" TMPDIR="$tmp/b" GOAL_INTERVAL=1 GOAL_MAX_WAIT=5 \
   "$BASH" "$G" B1 B2 --quiet 2>/dev/null)
 echo "$salida_b" | grep -qF '| B1 | #11 | MERGED | — | entró |' || falla "B1 debería entrar tras update-branch"
 grep -qx 'gh pr update-branch 11' "$L" || falla "B1 atrás de main debería pedir gh pr update-branch"
@@ -321,17 +373,28 @@ echo "$salida_sb" | grep -qF '| S4 | — | sin correr | — | no corrió: claude
 [ "$(grep -c '^claude auto ' "$L")" -eq 1 ] || falla "tras Not logged in no debería abrir más sesiones"
 [ ! -e "$tmp/repo/.claude/worktrees/goal-S3" ] || falla "el worktree vacío de S3 debería borrarse"
 
-# Con git.merge manual, goal.sh no arranca ni abre sesiones.
+# Con git.merge manual, goal.sh no activa el auto-merge: espera a que una
+# persona apruebe y mergee el PR (aquí, a la tercera consulta) y sigue.
 : > "$L"
 jq '. + {git: {merge: "manual"}}' "$tmp/repo/.city.json" > "$tmp/manual.json" && cp "$tmp/manual.json" "$tmp/repo/.city.json"
-(cd "$tmp/repo" && PATH="$tmp/bin:$PATH" TMPDIR="$tmp/t" "$BASH" "$G" S2 >/dev/null 2>"$tmp/stderr-manual")
+salida_mm=$(cd "$tmp/repo" && PATH="$tmp/bin:$PATH" TMPDIR="$tmp/mm" GOAL_INTERVAL=1 GOAL_MAX_WAIT=1 GOAL_HUMAN_WAIT=30   "$BASH" "$G" M1 --quiet 2>"$tmp/stderr-mm")
 rc=$?
-[ "$rc" -eq 2 ] || falla "con git.merge manual debería salir con 2 (salió con $rc)"
-grep -q 'merge de este repo es manual' "$tmp/stderr-manual" || falla "con git.merge manual debería decir por qué no arranca"
-grep -q '^claude ' "$L" && falla "con git.merge manual no debería abrir sesiones de claude"
+[ "$rc" -eq 0 ] || falla "con git.merge manual y el PR mergeado por una persona debería salir con 0 (salió con $rc)"
+echo "$salida_mm" | grep -qF '| M1 | #13 | MERGED | — | entró |' || falla "M1 debería entrar cuando la persona mergea"
+grep -qE '^gh pr merge 13' "$L" && falla "con git.merge manual no debería tocar el merge"
+grep -q '^ship-extra .*Merge: manual' "$L" || falla "con git.merge manual ship debería recibir que el merge es manual"
+grep -qF 'espera la aprobación y el merge de una persona' "$tmp"/mm/city-goal/*.log || falla "debería anotar que espera a una persona"
+git -C "$tmp/repo" worktree list | grep -q 'goal-M1' && falla "el worktree de M1 debería borrarse: su PR entró"
+
+# Opciones: los nombres en inglés y los anteriores como alias; el uso solo nombra los nuevos.
+for o in --max-sessions --max-blocks --max-sesiones --max-bloqueos; do
+  err_o=$("$BASH" "$G" S1 "$o" 0 2>&1 >/dev/null); rc=$?
+  { [ "$rc" -eq 2 ] && echo "$err_o" | grep -qF -- "$o pide un entero mayor que 0"; } || falla "$o debería aceptarse como opción y pedir un entero (salió con $rc: $err_o)"
+  echo "$err_o" | grep -qE -- '--max-(sesiones|bloqueos) N' && falla "el uso solo debería nombrar --max-sessions y --max-blocks"
+done
 
 if [ "$fallas" -gt 0 ]; then
   echo "--- stdout"; echo "$salida"; echo "--- stderr"; cat "$tmp/stderr"; echo "--- llamadas"; cat "$L"
   exit 1
 fi
-echo "goal.sh en seco: 2 ids, uno entra y otro para por Bloqueo; guarda del auto-merge; --quiet; stream sin result; slots, ids y ramas atrás de main; claude sin sesión antes y durante (bash $BASH_VERSION)"
+echo "goal.sh en seco: 2 ids, uno entra y otro para por Bloqueo; guarda del auto-merge con owners.sh; espera decisión; --quiet; stream sin result; slots, ids y ramas atrás de main; claude sin sesión antes y durante; merge manual que espera a una persona (bash $BASH_VERSION)"

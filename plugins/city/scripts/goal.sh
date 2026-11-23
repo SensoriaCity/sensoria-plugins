@@ -1,43 +1,51 @@
 #!/usr/bin/env bash
 # Bucle por objetivo: build → ship → checks → merge, una funcionalidad a la vez
 # y sin nadie mirando. Compatible con el bash 3.2 de macOS.
-# Uso: goal.sh <id>... [--plan <ruta>] [--max-sesiones N] [--max-bloqueos N] [--quiet]
+# Uso: goal.sh <id>... [--plan <ruta>] [--max-sessions N] [--max-blocks N] [--quiet]
 # Corre desde la raíz del repo. Toma un slot libre del lab, s1 a s3 (sin slot
 # libre no arranca), y exporta a sus sesiones CITY_SLOT, CITY_HTTP_PORT (808N),
 # CITY_MAILPIT_PORT (802(5+N)) y CITY_BASE_DOMAIN (sN.city.localhost). Reclama
 # cada id para que otro bucle no lo construya. Por cada id, en orden: worktree nuevo desde
 # origin/main en .claude/worktrees/goal-<id>; ahí `claude -p "/city:build <id>
 # [plan]"` y, sin bloqueo, `claude -p "/city:ship"`; si ningún archivo del PR
-# cae en codeowners_paths, activa su auto-merge; espera los checks y el merge,
-# y trae main a la rama si queda atrás (con conflicto, para ese id).
+# tiene dueño (owners.sh: la unión de codeowners_paths y del archivo de dueños
+# de origin/main), activa su auto-merge; espera los checks y el merge,
+# y trae main a la rama si queda atrás (con conflicto, para ese id). Con
+# git.merge manual no activa nada: espera a que una persona apruebe y mergee
+# el PR (hasta GOAL_HUMAN_WAIT segundos, 24 h) antes del id siguiente.
 # Si un check falla, quita el auto-merge y reintenta build y ship en la misma
-# rama; al segundo fallo, para ese id. Al terminar cada id baja la instalación
-# (qa.bajar de .city.json; sin él, Compose con el perfil onprem, solo si el
-# .env del worktree nombra su proyecto) y borra el
-# worktree solo si el PR entró. Paradas globales: --max-sesiones sesiones de
-# claude (12), --max-bloqueos ids seguidos sin merge (2), una salida de build
-# con "necesita ADR" o "Bloqueo", una sesión con "Not logged in" y Docker
-# apagado. Antes del primer worktree prueba que claude tenga sesión.
+# rama; al segundo fallo, para ese id. Si el PR nace esperando la decisión de
+# una persona (el revisor terminó en "espera decisión"), no es un rojo: no
+# activa el auto-merge, no espera checks, no reintenta ni gasta una vuelta;
+# el bucle se detiene y dice quién decide. Al terminar cada id baja la
+# instalación (qa.teardown de .city.json; sin él, Compose con el perfil
+# onprem, solo si el .env del worktree nombra su proyecto) y borra el
+# worktree solo si el PR entró. Paradas globales: --max-sessions sesiones de
+# claude (12), --max-blocks ids seguidos sin merge (2), una salida de build
+# con "necesita ADR" o "Bloqueo", un PR que espera una decisión, una sesión
+# con "Not logged in" y Docker apagado. Antes del primer worktree prueba que
+# claude tenga sesión.
 # Log en ${TMPDIR:-/tmp}/city-goal/<fecha>.log; el resumen (goal.md) sale por
 # stdout y el avance por stderr: una línea por herramienta de cada sesión y, en
 # una terminal, una línea de estado (--quiet: solo las líneas del log). Sale
 # con 0 si todos los PR entraron, 1 si no y 2 si no pudo empezar.
 set -uo pipefail
 
-intervalo=${GOAL_INTERVALO:-30}     # segundos entre consultas a GitHub
-espera_max=${GOAL_ESPERA_MAX:-7200} # segundos máximos esperando checks y merge de un PR
+intervalo=${GOAL_INTERVAL:-30}     # segundos entre consultas a GitHub
+espera_max=${GOAL_MAX_WAIT:-7200} # segundos máximos esperando checks y merge de un PR
+espera_humana=${GOAL_HUMAN_WAIT:-86400} # con git.merge manual, segundos máximos esperando a la persona
 
-uso() { echo "goal: ${1:+$1. }uso: goal.sh <id>... [--plan <ruta>] [--max-sesiones N] [--max-bloqueos N] [--quiet]" >&2; exit 2; }
+uso() { echo "goal: ${1:+$1. }uso: goal.sh <id>... [--plan <ruta>] [--max-sessions N] [--max-blocks N] [--quiet]" >&2; exit 2; }
 entero() { case "$2" in ''|*[!0-9]*|0) uso "$1 pide un entero mayor que 0" ;; esac; }
 
 ids=(); plan=""; max_sesiones=12; max_bloqueos=2; quiet=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --plan) [ $# -ge 2 ] || uso "--plan pide una ruta"; plan=$2; shift 2 ;;
-    --max-sesiones) [ $# -ge 2 ] || uso; entero "$1" "$2"; max_sesiones=$2; shift 2 ;;
-    --max-bloqueos) [ $# -ge 2 ] || uso; entero "$1" "$2"; max_bloqueos=$2; shift 2 ;;
+    --max-sessions|--max-sesiones) [ $# -ge 2 ] || uso; entero "$1" "$2"; max_sesiones=$2; shift 2 ;;
+    --max-blocks|--max-bloqueos) [ $# -ge 2 ] || uso; entero "$1" "$2"; max_bloqueos=$2; shift 2 ;;
     --quiet) quiet=1; shift ;;
-    -h|--help) sed -n '2,24p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,/^set -uo/p' "$0" | sed '$d'; exit 0 ;;
     -*) uso "opción desconocida: $1" ;;
     *) case "$1" in .*|*[!A-Za-z0-9._-]*) uso "id inválido: '$1'" ;; esac; ids+=("$1"); shift ;;
   esac
@@ -47,17 +55,15 @@ done
 for c in git gh jq claude docker; do
   command -v "$c" >/dev/null 2>&1 || { echo "goal: necesito $c" >&2; exit 2; }
 done
+kit_scripts=$(cd "$(dirname "$0")" && pwd)
 raiz=$(git rev-parse --show-toplevel 2>/dev/null) || { echo "goal: no es un repo git" >&2; exit 2; }
 cd "$raiz" || exit 2
 [ -f .city.json ] || { echo "goal: no hay .city.json en la raíz del repo" >&2; exit 2; }
-ramas=$(jq -r '.ramas // empty' .city.json) || { echo "goal: .city.json no es JSON válido" >&2; exit 2; }
-evidencia_dir=$(jq -r '.evidencia_dir // empty' .city.json)
-bajar=$(jq -r '.qa.bajar // empty' .city.json)
-[ -n "$ramas" ] || { echo "goal: .city.json no tiene ramas" >&2; exit 2; }
-if [ "$(jq -r '.git.merge // "auto"' .city.json)" = manual ]; then
-  echo "goal: el merge de este repo es manual (git.merge en .city.json) y el bucle necesita auto-merge" >&2
-  exit 2
-fi
+ramas=$(jq -r '.branches // .ramas // empty' .city.json) || { echo "goal: .city.json no es JSON válido" >&2; exit 2; }
+bajar=$(jq -r '.qa.teardown // .qa.bajar // empty' .city.json)
+[ -n "$ramas" ] || { echo "goal: .city.json no tiene branches" >&2; exit 2; }
+modo_merge=$(jq -r '.git.merge // "auto"' .city.json | tr -d '\r')
+if [ "$modo_merge" = manual ]; then espera_max=$espera_humana; fi
 
 dir_log="${TMPDIR:-/tmp}"; dir_log="${dir_log%/}/city-goal"
 mkdir -p "$dir_log/slots" "$dir_log/ids" || exit 2
@@ -194,12 +200,19 @@ No uses la palabra 'Bloqueo' para nada más."
 # Ship no activa el auto-merge: el clasificador del modo auto lo niega ("Merge
 # Without Review") y lo decide activa_auto, que mira los archivos del PR.
 SIN_AUTO=" No actives el auto-merge ni lo intentes: goal.sh lo activa después si ningún archivo del PR \
-cae en codeowners_paths. En la línea 4 del cierre escribe 'Merge: lo decide goal.sh'."
+tiene dueño. En la línea 4 del cierre escribe 'Merge: lo decide goal.sh'."
+if [ "$modo_merge" = manual ]; then
+  SIN_AUTO=" No actives el auto-merge ni mergees: el PR lo aprueba y lo mergea una persona, y goal.sh \
+la espera antes del corte siguiente. En la línea 4 del cierre escribe 'Merge: manual'."
+fi
+SIN_AUTO="$SIN_AUTO Si el revisor terminó en 'Veredicto: espera decisión', la línea 4 es \
+'Merge: espera decisión de <persona> · <qué decide>' y el cuerpo del PR empieza por la línea \
+'**Pendiente:** decisión de <persona> · <qué decide>': goal.sh la lee y se detiene sin reintentar."
 
 sesiones=0; parada=""; rc=0
 sesion() { # sesion <worktree> <salida> <prompt> [contexto]: corre claude -p y deja su código en rc
   if [ "$sesiones" -ge "$max_sesiones" ]; then
-    parada="alcanzó --max-sesiones ($max_sesiones)"; anota "PARADA: $parada"; return 1
+    parada="alcanzó --max-sessions ($max_sesiones)"; anota "PARADA: $parada"; return 1
   fi
   sesiones=$((sesiones + 1))
   anota "sesión $sesiones/$max_sesiones en $(basename "$1"): $3"
@@ -231,37 +244,28 @@ sesion() { # sesion <worktree> <salida> <prompt> [contexto]: corre claude -p y d
   return 0
 }
 
-# El auto-merge lo activa goal.sh, nunca la sesión. Un PR que toca una ruta de
-# codeowners_paths no queda en auto-merge: si el autor es el único dueño, GitHub
-# no le pide su revisión y entraría sin que nadie lo lea. Los patrones salen de
-# origin/main, no del PR ni del checkout. Con [[ == ]] un `*` también cruza `/`:
-# casa de más, nunca de menos. Cuenta también el nombre anterior de un renombrado.
+# El auto-merge lo activa goal.sh, nunca la sesión. Un PR que toca una ruta con
+# dueño no queda en auto-merge: si el autor es el único dueño, GitHub no le pide
+# su revisión y entraría sin que nadie lo lea. Ruta con dueño es la unión de
+# codeowners_paths y del archivo de dueños del repo, y la da owners.sh, la misma
+# que usan ship y check. Los patrones salen de origin/main, no del PR ni del
+# checkout. Un `*` también cruza `/`: casa de más, nunca de menos. Cuenta
+# también el nombre anterior de un renombrado.
 activa_auto() { # activa_auto <n>: deja resultado vacío (auto-merge activo), retenido o sin-auto, y razon
-  local n=$1 sha archivos patrones f p
+  local n=$1 sha archivos con_dueno
   resultado=""; razon=""
-  patrones=$(git show origin/main:.city.json 2>>"$log" | jq -r '.codeowners_paths // [] | .[]' 2>>"$log")
-  if [ -z "$patrones" ]; then
-    for f in .github/CODEOWNERS CODEOWNERS docs/CODEOWNERS; do
-      if git cat-file -e "origin/main:$f" 2>/dev/null; then
-        resultado=sin-auto; razon="hay $f y .city.json no trae codeowners_paths"; return
-      fi
-    done
-  fi
-  sha=$(gh pr view "$n" --json headRefOid --jq .headRefOid 2>>"$log")
+  sha=$(gh pr view "$n" --json headRefOid --jq .headRefOid 2>>"$log" | tr -d '\r')
   archivos=$(gh api --paginate "repos/{owner}/{repo}/pulls/$n/files" \
-    --jq '.[] | .filename, (.previous_filename // empty)' 2>>"$log")
+    --jq '.[] | .filename, (.previous_filename // empty)' 2>>"$log" | tr -d '\r')
   if [ -z "$sha" ] || [ -z "$archivos" ]; then
     resultado=sin-auto; razon="no pude leer la cabeza o los archivos del PR #$n"; return
   fi
-  while IFS= read -r f; do
-    while IFS= read -r p; do
-      [ -n "$p" ] || continue
-      # shellcheck disable=SC2053 # sin comillas, p es patrón
-      if [[ "$f" == $p ]]; then razon="$razon $f"; break; fi
-    done <<<"$patrones"
-  done <<<"$archivos"
+  if ! con_dueno=$(printf '%s\n' "$archivos" | bash "$kit_scripts/owners.sh" --ref origin/main --match 2>>"$log"); then
+    resultado=sin-auto; razon="owners.sh no pudo leer las rutas con dueño de origin/main (ver el log)"; return
+  fi
+  razon=$(printf '%s' "$con_dueno" | tr -d '\r' | tr '\n' ' '); razon=${razon% }
   if [ -n "$razon" ]; then
-    resultado=retenido; razon=${razon# }; anota "PR #$n: toca $razon; queda sin auto-merge"; return
+    resultado=retenido; anota "PR #$n: toca $razon; queda sin auto-merge"; return
   fi
   # Atado al SHA cuyos archivos se leyeron: si llegó otro push, no se activa.
   if gh pr merge "$n" --auto --squash --match-head-commit "$sha" >>"$log" 2>&1; then
@@ -272,7 +276,7 @@ activa_auto() { # activa_auto <n>: deja resultado vacío (auto-merge activo), re
 }
 
 espera_pr() { # espera_pr <n>: deja en resultado merged, cerrado, rojo, conflicto, retenido, sin-auto o tiempo
-  local n=$1 inicio=$SECONDS estado_pr pendientes info merge salida
+  local n=$1 inicio=$SECONDS estado_pr pendientes info merge salida avisado=""
   fallidos=""
   anota "PR #$n: esperando checks y merge"
   estado_vivo "PR #$n" "" "$n"
@@ -309,12 +313,17 @@ espera_pr() { # espera_pr <n>: deja en resultado merged, cerrado, rojo, conflict
     pendientes=$(gh pr checks "$n" --json bucket --jq '[.[] | select(.bucket == "pending")] | length' 2>>"$log")
     if [ "${pendientes:-1}" = 0 ]; then
       # Todo en verde y sin merge: sin auto-merge (nació bloqueado) o retenido por CODEOWNERS.
-      info=$(gh pr view "$n" --json autoMergeRequest,reviewDecision \
-        --jq '"\(.autoMergeRequest != null) \(.reviewDecision)"' 2>>"$log")
-      case "$info" in
-        false*) resultado=sin-auto; break ;;
-        *REVIEW_REQUIRED*|*CHANGES_REQUESTED*) resultado=retenido; break ;;
-      esac
+      # Con merge manual eso es lo normal: sigue esperando a la persona.
+      if [ "$modo_merge" = manual ]; then
+        if [ -z "$avisado" ]; then anota "PR #$n: checks en verde; espera la aprobación y el merge de una persona"; avisado=1; fi
+      else
+        info=$(gh pr view "$n" --json autoMergeRequest,reviewDecision \
+          --jq '"\(.autoMergeRequest != null) \(.reviewDecision)"' 2>>"$log")
+        case "$info" in
+          false*) resultado=sin-auto; break ;;
+          *REVIEW_REQUIRED*|*CHANGES_REQUESTED*) resultado=retenido; break ;;
+        esac
+      fi
     fi
     if [ $((SECONDS - inicio)) -ge "$espera_max" ]; then resultado=tiempo; break; fi
     sleep "$intervalo"
@@ -322,11 +331,26 @@ espera_pr() { # espera_pr <n>: deja en resultado merged, cerrado, rojo, conflict
   para_estado
 }
 
+# "Veredicto: espera decisión" del revisor no es un rojo: nadie de la sesión lo
+# corrige. Ship abre el PR con la primera línea "**Pendiente:** decisión de
+# <persona> · <qué decide>" y lo dice en la línea 4 de su cierre.
+espera_decision() { # espera_decision <n> <salida de ship>: imprime "<persona> · <qué decide>" si el PR espera a una persona
+  local l
+  l=$(gh pr view "$1" --json body --jq .body 2>>"$log" | tr -d '\r' | grep -m1 '^\*\*Pendiente:\*\* decisión de ')
+  if [ -n "$l" ]; then printf '%s\n' "${l#\*\*Pendiente:\*\* decisión de }"; return 0; fi
+  l=$(grep -m1 -e 'Merge: espera decisión de ' -e 'Merge: espera la decisión de ' "$2" 2>/dev/null | tr -d '\r')
+  [ -n "$l" ] || return 1
+  l=${l#*decisión de }; printf '%s\n' "$l" | cut -c1-160
+}
+
 pasos_evaluador() { # pasos_evaluador <worktree> <id>: "3/4 cumplen · pasa" desde la evidencia, o —
-  local f="$1/${evidencia_dir%/}/$2.md"
-  if [ -z "$evidencia_dir" ] || [ ! -f "$f" ]; then echo "—"; return; fi
+  local f
+  f=$(cd "$1" && bash "$kit_scripts/slice.sh" "$2" 2>/dev/null | sed -n 's/^evidence=//p')
+  if [ -z "$f" ] || [ ! -f "$1/$f" ]; then echo "—"; return; fi
+  f="$1/$f"
   awk -F'|' '$2 ~ /^ *[0-9]+ *$/ { n++; r = $(NF-1); if (r ~ /cumple/ && r !~ /no cumple/) ok++ }
-    /^VEREDICTO:/ { v = $0; sub(/^VEREDICTO: */, "", v) }
+    /^VEREDICTO:/ { v = $0; sub(/^VEREDICTO: */, "", v); sub(/\r$/, "", v) }
+    /^VENCIDA:/ { v = "vencida" }
     END { printf "%d/%d cumplen · %s\n", ok, n, (v == "" ? "sin veredicto" : v) }' "$f"
 }
 
@@ -344,7 +368,7 @@ baja() { # baja <worktree>: baja la instalación que haya quedado en el worktree
 }
 
 corre_id() { # corre_id <id>: deja pr, estado, pasos y motivo
-  local id=$1 wt intento=1 extra="" rama="" salida linea
+  local id=$1 wt intento=1 extra="" rama="" salida linea decide
   pr="—"; estado="sin PR"; pasos="—"; motivo=""
   if ! docker info >/dev/null 2>&1; then
     parada="Docker apagado"; motivo=$parada; anota "PARADA: $parada"; return
@@ -374,11 +398,21 @@ corre_id() { # corre_id <id>: deja pr, estado, pasos y motivo
     pr=$(gh pr list --head "$rama" --state all --json number --jq '.[0].number // empty' 2>>"$log")
     if [ -z "$pr" ]; then pr="—"; motivo="ship no abrió PR"; break; fi
     estado=OPEN
-    activa_auto "$pr"
-    case "$resultado" in
-      retenido) motivo="retenido por CODEOWNERS: $razon"; break ;;
-      sin-auto) motivo="sin auto-merge: $razon"; break ;;
-    esac
+    if decide=$(espera_decision "$pr" "$dir_log/$fecha-$id-ship$intento.txt"); then
+      # No es un rojo ni una vuelta: no hay auto-merge, espera de checks ni
+      # reintento. Los cortes que siguen dependen de este: el bucle se detiene.
+      motivo="espera decisión de $decide"; parada="$id espera decisión de $decide (PR #$pr)"
+      anota "PARADA: $parada"; break
+    fi
+    if [ "$modo_merge" = manual ]; then
+      anota "PR #$pr: merge manual; lo aprueba y lo mergea una persona"
+    else
+      activa_auto "$pr"
+      case "$resultado" in
+        retenido) motivo="retenido por CODEOWNERS: $razon"; break ;;
+        sin-auto) motivo="sin auto-merge: $razon"; break ;;
+      esac
+    fi
     espera_pr "$pr"
     case "$resultado" in
       merged) estado=MERGED; motivo="entró"; break ;;
@@ -386,13 +420,13 @@ corre_id() { # corre_id <id>: deja pr, estado, pasos y motivo
       conflicto) motivo="conflicto con main"; break ;;
       retenido) motivo="retenido por CODEOWNERS"; break ;;
       sin-auto) motivo="checks en verde sin auto-merge: nació bloqueado"; break ;;
-      tiempo) motivo="sin merge tras ${espera_max}s"; break ;;
+      tiempo) motivo="sin merge tras ${espera_max}s${modo_merge/auto/}"; break ;;
     esac
     anota "PR #$pr: checks en rojo ($fallidos), intento $intento"
     if [ "$intento" -ge 2 ]; then motivo="checks en rojo dos veces: $fallidos"; break; fi
     # El reintento empuja a esta rama: con el auto-merge armado, entraría en
     # cuanto pasen los checks, sin que activa_auto vuelva a leer sus archivos.
-    if ! gh pr merge "$pr" --disable-auto >>"$log" 2>&1 &&
+    if [ "$modo_merge" != manual ] && ! gh pr merge "$pr" --disable-auto >>"$log" 2>&1 &&
        [ "$(gh pr view "$pr" --json autoMergeRequest --jq '.autoMergeRequest != null' 2>>"$log")" != false ]; then
       motivo="no pude quitar el auto-merge del PR #$pr antes del reintento"; break
     fi

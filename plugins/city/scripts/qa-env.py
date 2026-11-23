@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Confirma que la instalación que va a probar el evaluador está en esta máquina.
 
-    python3 entorno-qa.py [url]    (por omisión, qa.url de .city.json, expandida con qa.py)
+    python3 qa-env.py [url]    (por omisión, qa.url de .city.json, expandida con qa.py)
 
 Local es solo: localhost, 127.0.0.1, un nombre que termina en .localhost, o
 uno que termina en .test y resuelve únicamente a 127.0.0.1 en esta máquina

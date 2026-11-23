@@ -1,8 +1,8 @@
 {
   "name": "city",
   "displayName": "City",
-  "version": "2.2.0",
-  "description": "Flujo de desarrollo con agentes para city y city-v2: spec de una página partida en cortes verticales de ≤400 líneas, evaluador independiente cuya evidencia es el único camino a passes, auto-merge por checks y bucle por objetivo. Cada repo lo configura con .city.json.",
+  "version": "3.0.0",
+  "description": "Flujo de desarrollo con agentes para city y city-v2: una spec por hito en docs/apps/<aplicativo>/<modulo>/<hito>/, partida en cortes verticales con clase (slice, data, platform) de ≤400 líneas sin contar docs, escalera para esconder lo incompleto (permisos o flag), evaluador independiente cuya evidencia es el único camino a passes, y bucle por objetivo con auto-merge o con revisión humana en cada PR. Cada repo lo configura con .city.json.",
   "author": {
     "name": "Sensoria City",
     "email": "belmar@sensoria.city"

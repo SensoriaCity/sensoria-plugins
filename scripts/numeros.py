@@ -9,10 +9,10 @@ Uso (desde la raíz del repo medido, con gh autenticado):
     | python3 ~/Projects/sensoria-plugins/scripts/numeros.py [--config .city.json] [--autores usuario1,usuario2]
 
 La firma del flujo sale del .city.json del repo: un PR es `liviano` (el flujo city en el ADR-008) si su rama
-empieza por `ramas` o si tiene el `label`. Clasifica cada PR con una versión simplificada del ADR-008 de
+empieza por `branches` o si tiene el `label`. Clasifica cada PR con una versión simplificada del ADR-008 de
 aidd-metrics (hotfix > experimento > proceso > bmad > liviano > clasico) y reporta, por flujo, solo PRs
 mergeados a main:
-  n · tamaño p50/p85 (inserciones + borrados, sin lockfiles, vendor ni evidencia_dir, como scripts/tamano.sh)
+  n · tamaño p50/p85 (inserciones + borrados, sin lockfiles, vendor ni evidence_dir, como scripts/size.sh)
   · lead time p50/p85 (primer commit → merge, en horas) · % sin revisión humana
   · primera revisión humana p50 (horas desde la apertura)
   · % de aprobaciones rápidas: PRs de 50 líneas o más cuya primera aprobación humana llegó sin comentarios
@@ -56,10 +56,11 @@ def firma(ruta):
     if not os.path.isfile(ruta):
         sys.exit(f"numeros: no encuentro {ruta}; corre desde la raíz del repo medido o pasa --config")
     cfg = json.load(open(ruta))
-    if not cfg.get("ramas") or not cfg.get("label"):
-        sys.exit(f"numeros: {ruta} no tiene ramas y label")
-    evidencia = (cfg.get("evidencia_dir") or "").rstrip("/")
-    return cfg["ramas"], cfg["label"], (evidencia + "/") if evidencia else None
+    ramas = cfg.get("branches") or cfg.get("ramas")  # ramas y evidencia_dir: nombres de city 2.x
+    if not ramas or not cfg.get("label"):
+        sys.exit(f"numeros: {ruta} no tiene branches y label")
+    evidencia = (cfg.get("evidence_dir") or cfg.get("evidencia_dir") or "").rstrip("/")
+    return ramas, cfg["label"], (evidencia + "/") if evidencia else None
 
 
 def flujo(pr, ramas, label):

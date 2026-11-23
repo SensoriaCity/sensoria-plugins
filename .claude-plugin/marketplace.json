@@ -9,7 +9,7 @@
     {
       "name": "city",
       "source": "./plugins/city",
-      "description": "Flujo de desarrollo con agentes para city y city-v2: spec en cortes verticales, build, ship, check y revisar en CI. Evaluador independiente dueño de passes, auto-merge por checks y .city.json por repo."
+      "description": "Flujo de desarrollo con agentes para city y city-v2: spec en cortes verticales, build, ship, check y review en CI. Evaluador independiente dueño de passes, auto-merge por checks y .city.json por repo."
     }
   ]
 }

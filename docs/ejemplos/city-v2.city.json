@@ -6,14 +6,14 @@
       "cd api && vendor/bin/pest",
       "corepack pnpm -C web test"
     ],
-    "navegador": [
+    "browser": [
       "corepack pnpm -C web e2e"
     ],
     "lint": [
       "cd api && vendor/bin/pint --test",
       "corepack pnpm -C web lint"
     ],
-    "estatico": [
+    "static": [
       "corepack pnpm -C web build"
     ],
     "audit": [
@@ -22,20 +22,20 @@
     ],
     "postgres": "bash bin/pest-postgres.sh"
   },
-  "tope_lineas": 400,
+  "line_limit": 400,
   "qa": {
     "url": "http://app.${CITY_BASE_DOMAIN:-city.localhost}:${CITY_HTTP_PORT:-8080}",
-    "instalar": "CITY_HTTP_PORT=${CITY_HTTP_PORT:-8080} bin/city install --lab",
+    "install": "CITY_HTTP_PORT=${CITY_HTTP_PORT:-8080} bin/city install --lab",
     "smoke": "bin/city smoke",
-    "puerto": "${CITY_HTTP_PORT:-8080}",
-    "usuario": "bin/city steward",
-    "usuario_stdin": ["correo", "correo", "nombre", "contraseña", "contraseña"]
+    "port": "${CITY_HTTP_PORT:-8080}",
+    "user": "bin/city steward",
+    "user_stdin": ["email", "email", "name", "password", "password"]
   },
   "features": "docs/lab/features",
   "specs_dir": "docs/specs",
-  "evidencia_dir": "docs/lab/evidencia",
+  "evidence_dir": "docs/lab/evidencia",
   "adr_dir": "docs/adr",
-  "ramas": "feat/",
+  "branches": "feat/",
   "label": "city",
   "codeowners_paths": [
     ".claude/**",
@@ -57,6 +57,6 @@
     "web/apps/*/package.json",
     ".city.json"
   ],
-  "revisor_extra": "docs/harness/revisor.md",
-  "seguridad_checklist": "docs/seguridad/checklist.md"
+  "reviewer_extra": "docs/harness/revisor.md",
+  "security_checklist": "docs/seguridad/checklist.md"
 }

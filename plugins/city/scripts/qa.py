@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
-"""Imprime qa.url o qa.puerto de .city.json con sus variables expandidas.
+"""Imprime qa.url o qa.port de .city.json con sus variables expandidas.
 
-    python3 qa.py url|puerto
+    python3 qa.py url|port
 
 Un valor de qa puede nombrar variables del entorno como ${VAR} o
 ${VAR:-valor}: goal.sh exporta las del slot del lab (CITY_SLOT, CITY_HTTP_PORT,
 CITY_MAILPIT_PORT y CITY_BASE_DOMAIN) y, sin slot, vale lo que va después de
 :-. Solo eso: ni comandos ni otras formas de $. url sale con el puerto de
-qa.puerto si no trae uno. Sale con 1 si falta la clave, una variable no tiene
+qa.port si no trae uno. Sale con 1 si falta la clave, una variable no tiene
 valor ni valor por omisión, o el puerto no es un número de 1 a 65535.
-qa.instalar no pasa por aquí: lo corre la shell, que expande las mismas formas.
+qa.install no pasa por aquí: lo corre la shell, que expande las mismas formas.
+Si falta qa.port lee qa.puerto, su nombre en city 2.x.
 """
 import json
 import os
@@ -46,11 +47,12 @@ def qa():
 
 
 def puerto(cfg):
-    if "puerto" not in cfg:
+    crudo = cfg.get("port", cfg.get("puerto"))
+    if crudo is None:
         return None
-    p = expande(cfg["puerto"])
+    p = expande(crudo)
     if not p.isdigit() or not 1 <= int(p) <= 65535:
-        raise ValueError(f"qa.puerto no es un puerto: {p!r}")
+        raise ValueError(f"qa.port no es un puerto: {p!r}")
     return int(p)
 
 
@@ -67,8 +69,8 @@ def url(cfg):
 
 if __name__ == "__main__":
     clave = sys.argv[1] if len(sys.argv) > 1 else ""
-    if clave not in ("url", "puerto"):
-        print("uso: qa.py url|puerto", file=sys.stderr)
+    if clave not in ("url", "port", "puerto"):
+        print("uso: qa.py url|port", file=sys.stderr)
         sys.exit(2)
     try:
         cfg = qa()
@@ -77,6 +79,6 @@ if __name__ == "__main__":
         print(f"qa: {e}", file=sys.stderr)
         sys.exit(1)
     if valor is None:
-        print("qa: qa.puerto falta en .city.json", file=sys.stderr)
+        print("qa: qa.port falta en .city.json", file=sys.stderr)
         sys.exit(1)
     print(valor)
