@@ -89,6 +89,25 @@ Un corte nunca se borra ni se renombra, y uno con `passes: true` nunca cambia de
 
 Un PR posterior que cambia código de un corte con `passes: true` va en una rama con su id, `<branches>AAAA-MM-DD-<id>-fix` (`-fix2` si ya hubo una), con la misma clase del corte. En el **mismo PR** el `evaluator` hace una pasada sobre la cabeza y reemplaza `evidence/<id>.md`, y `passes` se reconfirma con `scripts/passes.sh`: `passes.sh <id> --check` sale con 1 mientras la rama traiga código y la evidencia sea la de antes. `/city:ship` lo exige y el `reviewer` lo comprueba. Lo que vence la evidencia de un corte mezclado es eso, código nuevo en la rama que se comprueba: sobre `main`, la evidencia que entró con el merge del corte sigue vigente aunque otro corte posterior, con su propia evidencia, cambie los mismos archivos. No pide pasada nueva un cambio que `passes.sh` deja fuera de la huella: `docs/`, la evidencia, el archivo del corte y `PROGRESO.md`. Un arreglo a producción sigue yendo por `hotfix/`.
 
+**Código, para la evidencia, es todo lo demás.** Las pruebas cuentan: un commit que solo cambia un archivo de prueba vence la evidencia igual que uno que cambia la app, porque el evaluador corre esas pruebas en sus pasos. Antes de pedir una corrección menor (un `debería` del revisor) sobre un corte ya evaluado, cuenta con otra pasada completa del evaluador; si no la vale, va como deuda a un corte posterior que toque ese archivo.
+
+### Corregir un corte que aún no entra
+
+Un PR abierto cuyo corte ya trae `passes: true` en su rama, pero no en `origin/main`, no es una corrección de un corte mezclado: no lleva `fix` en la entrada de `/city:build` ni rama `-fix`. Se sigue en la misma rama, en este orden:
+
+1. El commit del código.
+2. `passes.sh <id> --reset`, que ahora sale con algo que hacer (antes del commit del código, `--check` sale con 0 y no marca nada), y el commit de la evidencia vencida con su mensaje de `git.md`.
+3. La primera línea del cuerpo vuelve a `**Pendiente:** reviewer, evaluator`. El veredicto del revisor que estaba sobre otro commit queda vencido: en "Veredictos" dice `vencido: era de <sha>`, no el veredicto viejo.
+4. Otra vuelta del revisor y otra pasada del evaluador sobre la cabeza. Con roles separados, quien construye hace los pasos 1 a 3 y no corre ninguno de los dos.
+
+"La prueba primero" se cumple así cuando el defecto está en la prueba misma: se muestra la prueba vieja en verde con el defecto y la nueva en rojo con el mismo defecto (por ejemplo, el valor por omisión cambiado a mano, sin commit).
+
+### Un corte mezclado cuyos pasos deja falsos una decisión posterior
+
+Un corte con `passes: true` no cambia de texto. Si una decisión posterior vuelve falso uno de sus pasos (lo que bloqueaba ya no se decide igual), `/city:spec revise <hito>` crea un corte nuevo con `covers: ["decision:<n>"]` que hace verdad lo nuevo. La entrada de "Decisiones tomadas" nombra los pasos que reemplaza, con su corte y número: `pasos 3 y 4 de m28-h01-s15 los reemplaza m28-h01-s16`. La evidencia del corte viejo se queda como historia de lo que fue verdad en su commit.
+
+Si lo que cambia es solo cómo se prueba un paso (otra técnica, otra prueba) y el `do` y el `expect` siguen siendo verdad, no hay revisión: los pasos describen comportamiento, no la prueba. La evidencia del evaluador dice en esa fila con qué prueba lo comprobó.
+
 ## Clases
 
 Cada corte tiene una clase. Va como etiqueta del PR (`class:slice`, `class:data`, `class:platform`, `class:spec`) y decide quién aprueba.

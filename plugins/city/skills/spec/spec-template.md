@@ -49,6 +49,7 @@ Primer tramo: <ids> — <qué ve una persona cuando entran>.
 - Migraciones: <qué crea y su reversa, y por qué `main` la tolera; solo en clase `data`>
 - No decide solo: <o "nada">
 - Estimación: <código + pruebas>
+- Despliegue: <lo que tiene que pasar en cada ambiente antes de que llegue este código y que no es otro corte (una variable en el `.env` de cada municipio, un cambio en otro sistema), quién lo hace y qué pasa si se invierte el orden; o borra la línea. Otro corte que debe ir junto va en `ships_with`.>
 
 Los pasos de cada corte están en `slices/<id>.json`.
 
